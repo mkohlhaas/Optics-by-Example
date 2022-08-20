@@ -14,6 +14,7 @@ executable Optics-by-Example-Exercises
     build-depends:
         aeson >=2.1.0 && <2.2,
         base ^>=4.14.3.0,
+        bytestring >=0.10.12 && <0.11,
         containers >=0.6.5 && <0.7,
         lens >=5.1.1 && <5.2,
         lens-aeson >=1.2.1 && <1.3,

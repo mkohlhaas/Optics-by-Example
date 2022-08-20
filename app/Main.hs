@@ -4,11 +4,15 @@ import Control.Applicative
 import Control.Lens
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
+import Control.Monad.State
 import Data.Bits.Lens (bitAt)
+import qualified Data.ByteString as BS
 import Data.Char
 import Data.List (sort)
 import qualified Data.List as L
 import qualified Data.Map as M
+import Data.Monoid
+import Data.Ord (comparing)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Numeric.Lens (negated)
@@ -683,3 +687,618 @@ gameState = (Player, Item Wool 5)
 -- |
 -- >>> over (_2 . material) weave gameState
 -- (Player,Item {_material = Sweater, _amount = 5})
+
+--------------------
+-- Lens Operators --
+--------------------
+data Payload = Payload {_weightKilos ∷ Int, _cargo ∷ String} deriving (Show)
+
+newtype Boat = Boat {_payload ∷ Payload} deriving (Show)
+
+makeLenses ''Payload
+makeLenses ''Boat
+
+serenity ∷ Boat
+serenity = Boat (Payload 50000 "Livestock")
+
+-- |
+-- >>> view (payload . cargo) serenity
+-- "Livestock"
+
+-- |
+-- >>> serenity ^. payload . cargo
+-- "Livestock"
+
+-- |
+-- >>> serenity^.payload.cargo
+-- "Livestock"
+
+-- |
+-- >>> set (payload . cargo) "Medicine" serenity
+-- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
+
+-- |
+-- "Take serenity and then, regarding its payload's cargo, set it to Medicine"
+-- >>> serenity & payload . cargo .~ "Medicine"
+-- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
+
+-- |
+-- Chain multiple set's:
+-- >>> serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
+-- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+
+-- |
+-- Using traditional actions names:
+-- >>> serenity & set (payload . cargo) "Chocolate" & set (payload . weightKilos) 2310
+-- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+
+-- |
+-- %~ = over
+-- >>> serenity & payload . weightKilos %~ subtract 1000 & payload . cargo .~ "Chocolate"
+-- Boat {_payload = Payload {_weightKilos = 49000, _cargo = "Chocolate"}}
+
+----------------------------
+-- Operator Hieroglyphics --
+----------------------------
+
+-- |
+-- >>> (2, 30) & _2 +~ 5
+-- (2,35)
+
+-- |
+-- >>> (2, 30) & _2 -~ 5
+-- (2,25)
+
+-- |
+-- >>> (2, 30) & _2 *~ 5
+-- (2,150)
+
+-- |
+-- >>> (2, 30) & _2 //~ 5
+-- (2,6.0)
+
+-- |
+-- >>> (2, 30) & _1 ^~ 3
+-- (8,30)
+
+-- |
+-- >>> (False, 30) & _1 ||~ True
+-- (True,30)
+
+-- |
+-- >>> (True, 30) & _1 &&~ True
+-- (True,30)
+
+-- |
+-- >>> ("abra", 30) & _1 <>~ "cadabra"
+-- ("abracadabra",30)
+
+-----------------
+-- Thermometer --
+-----------------
+newtype Thermometer = Thermometer
+  { _temperature ∷ Int
+  }
+  deriving (Show)
+
+makeLenses ''Thermometer
+
+-- |
+-- >>> Thermometer 20 & temperature +~ 15
+-- Thermometer {_temperature = 35}
+
+-- |
+-- Get new focus.
+-- >>> Thermometer 20 & temperature <+~ 15
+-- (35,Thermometer {_temperature = 35})
+
+-- |
+-- Get old focus.
+-- >>> Thermometer 20 & temperature <<+~ 15
+-- (20,Thermometer {_temperature = 35})
+
+-- |
+-- >>> map (view _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- ["Star","SquarePants"]
+
+-- |
+-- Author thinks this looks a bit stupid.
+-- >>> map (^. _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- ["Star","SquarePants"]
+
+-- |
+-- >>> map (over _2 reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
+
+-- |
+-- Author thinks this looks a bit stupid.
+-- >>> map (_2 %~ reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
+
+-----------
+-- Folds --
+-----------
+
+data Role
+  = Gunner
+  | PowderMonkey
+  | Navigator
+  | Captain
+  | FirstMate
+  deriving (Show, Eq, Ord)
+
+data CrewMember = CrewMember
+  { _crewMemberName ∷ String,
+    _role ∷ Role,
+    _talents ∷ [String]
+  }
+  deriving (Show, Eq, Ord)
+
+makeLenses ''CrewMember
+
+roster ∷ S.Set CrewMember
+roster =
+  S.fromList
+    --              Name                    Role              Talents
+    [ CrewMember "Grumpy Roger" {-    -} Gunner {-      -} ["Juggling", "Arbitrage"],
+      CrewMember "Long-John Bronze" {--} PowderMonkey {--} ["Origami"],
+      CrewMember "Salty Steve" {-     -} PowderMonkey {--} ["Charcuterie"],
+      CrewMember "One-eyed Jack" {-   -} Navigator {-   -} []
+    ]
+
+crewMembers ∷ Fold (S.Set CrewMember) CrewMember
+crewMembers = folded
+
+-- |
+-- >>> roster ^.. crewMembers
+-- [CrewMember {_crewMemberName = "Grumpy Roger", _role = Gunner, _talents = ["Juggling","Arbitrage"]},CrewMember {_crewMemberName = "Long-John Bronze", _role = PowderMonkey, _talents = ["Origami"]},CrewMember {_crewMemberName = "One-eyed Jack", _role = Navigator, _talents = []},CrewMember {_crewMemberName = "Salty Steve", _role = PowderMonkey, _talents = ["Charcuterie"]}]
+
+-- |
+-- `Maybe` is Foldable!
+-- >>> Just "Buried Treasure" ^.. folded
+-- ["Buried Treasure"]
+
+-- |
+-- `folded` might focus zero elements
+-- >>> Nothing ^.. folded
+-- []
+
+-- |
+-- >>> Identity "Cutlass" ^.. folded
+-- ["Cutlass"]
+
+-- |
+-- Remember that the Foldable instance of tuple only focuses the right-hand value
+-- >>> ("Rubies", "Gold") ^.. folded
+-- ["Gold"]
+
+-- |
+-- Folding a Map focuses only the values not the keys
+-- >>> M.fromList [("Jack", "Captain"), ("Will", "First Mate")] ^.. folded
+-- ["Captain","First Mate"]
+
+-- Lenses can be used directly as folds!
+crewRole ∷ Fold CrewMember Role
+crewRole = role
+
+-- |
+-- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+-- >>> jerry ^. role
+-- PowderMonkey
+
+-- |
+-- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+-- >>> jerry ^.. role
+-- [PowderMonkey]
+
+-- When we use a `lens` as a `fold` we can mentally substitute the types like this:
+-- `Lens' s a` becomes `Fold s a`
+
+-- |
+-- >>> roster ^.. folded . role
+-- [Gunner,PowderMonkey,Navigator,PowderMonkey]
+
+-- |
+-- `both` on tuples focuses both at once
+-- >>> ("Gemini", "Leo") ^.. both
+-- ["Gemini","Leo"]
+
+-- |
+-- `both` on an Either type focuses whichever side is present
+-- >>> Left "Albuquerque" ^.. both
+-- ["Albuquerque"]
+
+-- |
+-- >>> Right "Yosemite" ^.. both
+-- ["Yosemite"]
+
+-- |
+-- Only the last two type params of a tuple are 'bitraversable'
+-- >>> ("Gemini", "Leo", "Libra") ^.. both
+-- ["Leo","Libra"]
+
+-- |
+-- There's an `Each` instance for all reasonable sizes of tuples
+-- >>> (1, 2, 3, 4, 5) ^.. each
+-- [1,2,3,4,5]
+
+-- |
+-- Selects each element of a list
+-- >>> [1, 2, 3, 4, 5] ^.. each
+-- [1,2,3,4,5]
+
+------------------
+-- Custom Folds --
+------------------
+
+newtype Name = Name {getName ∷ String}
+  deriving (Show)
+
+data ShipCrew = ShipCrew
+  { _shipName ∷ Name,
+    _captain ∷ Name,
+    _firstMate ∷ Name,
+    _conscripts ∷ [Name]
+  }
+  deriving (Show)
+
+makeLenses ''ShipCrew
+
+collectCrewMembers ∷ ShipCrew → [Name]
+collectCrewMembers crew = [_captain crew, _firstMate crew] ++ _conscripts crew
+
+allCrewMembers ∷ Fold ShipCrew Name
+allCrewMembers = folding collectCrewMembers
+
+myCrew ∷ ShipCrew
+myCrew =
+  ShipCrew
+    { _shipName = Name "Purple Pearl",
+      _captain = Name "Grumpy Roger",
+      _firstMate = Name "Long-John Bronze",
+      _conscripts = [Name "One-eyed Jack", Name "Filthy Frank"]
+    }
+
+-- |
+-- >>> myCrew ^.. allCrewMembers
+-- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
+
+---------------------------------------------------------------------------------------------------------------------------------------
+-- Rule: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! --
+---------------------------------------------------------------------------------------------------------------------------------------
+
+-- The to helper is pretty simple, it converts a function directly into a fold!
+
+-- |
+-- >>> Name "Two-faced Tony" ^. to getName
+-- "Two-faced Tony"
+
+-- |
+-- We can chain many `to`s in a row
+-- >>> import Data.Char (toUpper)
+-- >>> Name "Two-faced Tony" ^. to getName . to (fmap toUpper)
+-- "TWO-FACED TONY"
+
+-- |
+-- Or simply use function composition before passing to `to`
+-- However, I find it confusing to switch from reading
+-- left-to-right into right-to-left like this:
+-- >>> Name "Two-faced Tony" ^. to (fmap toUpper . getName)
+-- "TWO-FACED TONY"
+
+-- |
+-- `to` allows us to easily interleave function transformations into a path of composed optics.
+-- >>> myCrew ^.. allCrewMembers . to getName
+-- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
+
+----------------
+-- Crew Names --
+----------------
+crewNames ∷ Fold ShipCrew Name
+crewNames =
+  folding
+    ( \s →
+        s ^.. captain
+          <> s ^.. firstMate
+          <> s ^.. conscripts . folded
+    )
+
+-- |
+-- >>> myCrew ^.. crewNames . to getName
+-- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
+
+------------------------
+-- Queries with Folds --
+------------------------
+
+-- |
+-- >>> elemOf folded 3 [1, 2, 3, 4]
+-- True
+
+-- |
+-- >>> elemOf folded 99 [1, 2, 3, 4]
+-- False
+
+-- |
+-- >>> anyOf folded even [1, 2, 3, 4]
+-- True
+
+-- |
+-- >>> anyOf folded (>10) [1, 2, 3, 4]
+-- False
+
+-- |
+-- >>> allOf folded even [1, 2, 3, 4]
+-- False
+
+-- |
+-- >>> allOf folded (<10) [1, 2, 3, 4]
+-- True
+
+-- |
+-- >>> findOf folded even [1, 2, 3, 4]
+-- Just 2
+
+-- |
+-- >>> findOf folded (>10) [1, 2, 3, 4]
+-- Nothing
+
+-- |
+-- >>> has folded []
+-- False
+
+-- |
+-- >>> has folded [1, 2]
+-- True
+
+-- |
+-- >>> hasn't folded []
+-- True
+
+-- |
+-- >>> hasn't folded [1, 2]
+-- False
+
+-- |
+-- >>> lengthOf folded [1, 2, 3, 4]
+-- 4
+
+-- |
+-- >>> sumOf folded [1, 2, 3, 4]
+-- 10
+
+-- |
+-- >>> productOf folded [1, 2, 3, 4]
+-- 24
+
+-- |
+-- >>> firstOf folded []
+-- Nothing
+
+-- |
+-- >>> firstOf folded [1, 2, 3, 4]
+-- Just 1
+
+-- |
+-- >>> preview folded [1, 2, 3, 4]
+-- Just 1
+
+-- |
+-- >>> [1, 2, 3, 4] ^? folded
+-- Just 1
+
+-- |
+-- >>> lastOf folded [1, 2, 3, 4]
+-- Just 4
+
+-- |
+-- >>> minimumOf folded [2, 1, 4, 3]
+-- Just 1
+
+-- |
+-- >>> maximumOf folded [2, 1, 4, 3]
+-- Just 4
+
+-- |
+-- >>> minimumOf folded []
+-- Nothing
+
+-- |
+-- >>> maximumOf folded []
+-- Nothing
+
+--------------
+-- TV Shows --
+--------------
+
+data Actor = Actor
+  { _actorName ∷ String,
+    _birthYear ∷ Int
+  }
+  deriving (Show, Eq)
+
+makeLenses ''Actor
+
+data TVShow = TVShow
+  { _title ∷ String,
+    _numEpisodes ∷ Int,
+    _numSeasons ∷ Int,
+    _criticScore ∷ Double,
+    _actors ∷ [Actor]
+  }
+  deriving (Show, Eq)
+
+makeLenses ''TVShow
+
+howIMetYourMother ∷ TVShow
+howIMetYourMother =
+  TVShow
+    { _title = "How I Met Your Mother",
+      _numEpisodes = 208,
+      _numSeasons = 9,
+      _criticScore = 83,
+      _actors =
+        [ Actor "Josh Radnor" 1974,
+          Actor "Cobie Smulders" 1982,
+          Actor "Neil Patrick Harris" 1973,
+          Actor "Alyson Hannigan" 1974,
+          Actor "Jason Segel" 1980
+        ]
+    }
+
+buffy ∷ TVShow
+buffy =
+  TVShow
+    { _title = "Buffy the Vampire Slayer",
+      _numEpisodes = 144,
+      _numSeasons = 7,
+      _criticScore = 81,
+      _actors =
+        [ Actor "Sarah Michelle Gellar" 1977,
+          Actor "Alyson Hannigan" 1974,
+          Actor "Nicholas Brendon" 1971,
+          Actor "David Boreanaz" 1969,
+          Actor "Anthony Head" 1954
+        ]
+    }
+
+tvShows ∷ [TVShow]
+tvShows = [howIMetYourMother, buffy]
+
+-- |
+-- >>> sumOf (folded . numEpisodes) tvShows
+-- 352
+
+-- |
+-- >>> sum $ tvShows ^.. folded . numEpisodes
+-- 352
+
+-- |
+-- >>> maximumOf (folded . criticScore) tvShows
+-- Just 83.0
+
+-- |
+-- >>> _title <$> maximumByOf folded (comparing _criticScore) tvShows
+-- Just "How I Met Your Mother"
+
+-- |
+-- >>> minimumByOf (folded . actors . folded) (comparing _birthYear) tvShows
+-- Just (Actor {_actorName = "Anthony Head", _birthYear = 1954})
+
+-- `comparingOf` accepts a lens and will return the sort of comparator function that actions like `minimumByOf` expects.
+comparingOf ∷ Ord a ⇒ Lens' s a → (s → s → Ordering)
+comparingOf l = comparing (view l)
+
+-- |
+-- >>> minimumByOf (folded . actors . folded) (comparingOf birthYear) tvShows
+-- Just (Actor {_actorName = "Anthony Head", _birthYear = 1954})
+
+--------------------------
+-- Folding with Effects --
+--------------------------
+
+calcAge ∷ Actor → Int
+calcAge actor = 2030 - _birthYear actor
+
+showActor ∷ Actor → String
+showActor actor = _actorName actor <> ": " <> show (calcAge actor)
+
+-- |
+-- >>> traverseOf_ (folded . actors . folded . to showActor) putStrLn tvShows
+-- Josh Radnor: 56
+-- Cobie Smulders: 48
+-- Neil Patrick Harris: 57
+-- Alyson Hannigan: 56
+-- Jason Segel: 50
+-- Sarah Michelle Gellar: 53
+-- Alyson Hannigan: 56
+-- Nicholas Brendon: 59
+-- David Boreanaz: 61
+-- Anthony Head: 76
+
+-- |
+-- Oftentimes it's handy to build up a stateful computation from the focuses of a fold.
+-- >>> import Control.Monad.State
+-- >>> execState (traverseOf_ folded (modify . const (+ 1)) tvShows) 0
+-- 2
+
+-- |
+-- >>> (Sum 1, Sum 32) <> (Sum 1, Sum 20)
+-- (Sum {getSum = 2},Sum {getSum = 52})
+
+-- transform actor to monoid
+ageSummary ∷ Actor → (Sum Int, Sum Int)
+ageSummary actor = (Sum 1, Sum (calcAge actor))
+
+-- |
+-- >>> foldOf (folded . actors . folded . to ageSummary) tvShows
+-- (Sum {getSum = 10},Sum {getSum = 572})
+
+-- compute average age
+computeAverage ∷ (Sum Int, Sum Int) → Double
+computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
+
+-- |
+-- >>> computeAverage $ foldOf (folded . actors . folded . to ageSummary) tvShows
+-- 57.2
+
+-- |
+-- >>> computeAverage $ foldMapOf (folded . actors . folded) ageSummary tvShows
+-- 57.2
+
+---------------------------
+-- Using ‘view’ on folds --
+---------------------------
+
+-- A very common mistake when people get started with folds is to accidentally use (^.) or view on a
+-- fold instead of a lens. This is especially confusing because it actually works in some cases but not
+-- others.
+
+-- |
+-- This works just fine
+-- >>> Just "do it" ^. folded
+-- "do it"
+
+-- This one crashes and burns!
+-- >>> Just (42 ∷ Int) ^. folded
+-- No instance for (Monoid Int) arising from a use of ‘folded’
+
+-- |
+-- When there's a single focus, we just return it
+-- >>> Just "do it" ^. folded
+-- "do it"
+
+-- |
+-- When there aren't any focuses, return 'mempty'
+-- >>> Nothing ^. folded ∷ String
+-- ""
+
+-- |
+-- When there are multiple focuses, combine them with (<>).
+-- >>> ("one", "two", "three") ^. each
+-- "onetwothree"
+
+-- In general you should avoid this "weird" behaviour and just use `foldOf` explicitly when you want this behaviour.
+
+--------------------------------
+-- Customizing Monoidal Folds --
+--------------------------------
+
+-- |
+-- >>> foldMapOf (folded . actors . folded . actorName) (\n → M.singleton n 1) tvShows
+-- fromList [("Alyson Hannigan",1),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
+
+-- |
+-- When we combine two maps with the same keys it simply ignores duplicate values.
+-- >>> M.singleton 'a' "first" <> M.singleton 'a' "second"
+-- fromList [('a',"first")]
+
+-- |
+-- This looks better:
+-- >>> M.unionWith (+) (M.singleton "an actor" 1) (M.singleton "an actor" 1)
+-- fromList [("an actor",2)]
+
+-- |
+-- "Alyson Hannigan" is in both shows.
+-- >>> foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (\n → M.singleton n 1) tvShows
+-- fromList [("Alyson Hannigan",2),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
