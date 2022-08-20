@@ -168,7 +168,7 @@ makeLenses ''Ship
 
 -- |
 -- 2nd lens law:
--- Setting back what you got doesn’t do anything (get-set)
+-- Setting back what you got doesn't do anything (get-set)
 -- >>> let structure = ("Simpsons", "Seinfeld")
 -- >>> set _1 (view _1 structure) structure
 -- ("Simpsons","Seinfeld")
@@ -207,16 +207,17 @@ makeLenses ''Ship
 data Err
   = ReallyBadError {_msg ∷ String}
   | ExitCode {_code ∷ Int}
+  deriving (Eq)
 
-makeLenses ''Err
+-- makeLenses ''Err
 
--- msg ∷ Lens' Err String
--- msg = lens getMsg setMsg
---   where
---     getMsg (ReallyBadError message) = message
---     getMsg (ExitCode _) = "" -- Hrmm, I guess we just return ""?
---     setMsg (ReallyBadError _) newMessage = ReallyBadError newMessage
---     setMsg (ExitCode n) newMessage = ExitCode n -- Nowhere to set it, I guess we do nothing?
+msg ∷ Lens' Err String
+msg = lens getMsg setMsg
+  where
+    getMsg (ReallyBadError message) = message
+    getMsg (ExitCode _) = "" -- Hrmm, I guess we just return ""?
+    setMsg (ReallyBadError _) newMessage = ReallyBadError newMessage
+    setMsg (ExitCode n) newMessage = ExitCode n -- Nowhere to set it, I guess we do nothing?
 
 -- |
 -- >>> let newMessage = "False alarm!"
@@ -239,6 +240,36 @@ makeLenses ''Err
 -- >>> let newMessage = "False alarm!"
 -- >>> view msg (set msg newMessage (ExitCode 1)) == newMessage
 -- False
+
+-- |
+-- Checking 2nd lens law:
+-- Setting back what you got doesn't do anything (get-set)
+-- >>> let err = ReallyBadError "BAD BAD BAD"
+-- >>> set msg (view msg err) err == err
+-- True
+
+-- |
+-- >>> let err = ExitCode 1
+-- >>> set msg (view msg err) err == err
+-- True
+
+-- |
+-- Checking 3rd lens law:
+-- Setting twice is the same as setting once (set-set)
+-- >>> let err = ReallyBadError "BAD BAD BAD"
+-- >>> let value1 = "Value1"
+-- >>> let value2 = "Value2"
+-- >>> set msg value2 (set msg value1 err) == set msg value2 err
+-- True
+
+-- |
+-- Checking 3rd lens law:
+-- Setting twice is the same as setting once (set-set)
+-- >>> let err = ExitCode 1
+-- >>> let value1 = "Value1"
+-- >>> let value2 = "Value2"
+-- >>> set msg value2 (set msg value1 err) == set msg value2 err
+-- True
 
 -------------
 -- Session --
@@ -299,3 +330,356 @@ alongsideSession = lensProduct userId id
 -- >>> let newSession = session {_userId = "USER-5678"}
 -- >>> view alongsideSession (set alongsideSession ("USER-9999", newSession) session) == ("USER-9999", newSession)
 -- False
+data Temperature = Temperature
+  { _location ∷ String,
+    _celsius ∷ Float
+  }
+  deriving (Show)
+
+makeLenses ''Temperature
+
+-- celsius ∷ Lens' Temperature Float
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> view celsius temp
+-- 7.0
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> set celsius 13.5 temp
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
+-- |
+-- Bump the temperature up by 10 degrees Celsius
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> over celsius (+10) temp
+-- Temperature {_location = "Berlin", _celsius = 17.0}
+
+-- Conversion Functions
+celsiusToFahrenheit ∷ Float → Float
+celsiusToFahrenheit c = (c * (9 / 5)) + 32
+
+fahrenheitToCelsius ∷ Float → Float
+fahrenheitToCelsius f = (f - 32) * (5 / 9)
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> view celsius temp & celsiusToFahrenheit
+-- 44.6
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> set celsius (fahrenheitToCelsius 56.3) temp
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
+-- |
+-- Bump the temp by 18 degrees Fahrenheit
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> over celsius (fahrenheitToCelsius . (+18) . celsiusToFahrenheit) temp
+-- Temperature {_location = "Berlin", _celsius = 17.0}
+
+-------------------
+-- Virtual Field --
+-------------------
+fahrenheit ∷ Lens' Temperature Float
+fahrenheit = lens getter setter
+  where
+    getter = celsiusToFahrenheit . view celsius
+    setter temp f = set celsius (fahrenheitToCelsius f) temp
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> view fahrenheit temp
+-- 44.6
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> set fahrenheit 56.3 temp
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
+-- |
+-- >>> let temp = Temperature "Berlin" 7.0
+-- >>> over fahrenheit (+ 18) temp
+-- Temperature {_location = "Berlin", _celsius = 17.0}
+
+----------
+-- Time --
+----------
+data Time = Time
+  { _hours ∷ Int,
+    _mins ∷ Int
+  }
+  deriving (Show)
+
+clamp ∷ Int → Int → Int → Int
+clamp minVal maxVal = min maxVal . max minVal
+
+hours ∷ Lens' Time Int
+hours = lens getter setter
+  where
+    getter (Time h _) = h
+    setter (Time _ m) newHours = Time (clamp 0 23 newHours) m
+
+mins ∷ Lens' Time Int
+mins = lens getter setter
+  where
+    getter (Time _ m) = m
+    setter (Time h _) newMinutes = Time h (clamp 0 59 newMinutes)
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> time
+-- Time {_hours = 3, _mins = 10}
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> set hours 40 time
+-- Time {_hours = 23, _mins = 10}
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> set mins (-10) time
+-- Time {_hours = 3, _mins = 0}
+
+------------------------
+-- alternative lenses --
+------------------------
+hours' ∷ Lens' Time Int
+hours' = lens getter setter
+  where
+    getter (Time h _) = h
+    setter (Time _ m) newHours = Time (newHours `mod` 24) m
+
+mins' ∷ Lens' Time Int
+mins' = lens getter setter
+  where
+    getter (Time _ m) = m
+    setter (Time h _) newMinutes = Time ((h + (newMinutes `div` 60)) `mod` 24) (newMinutes `mod` 60)
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> time
+-- Time {_hours = 3, _mins = 10}
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> over mins' (+ 55) time
+-- Time {_hours = 4, _mins = 5}
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> over mins' (subtract 20) time
+-- Time {_hours = 2, _mins = 50}
+
+-- |
+-- >>> let time = Time 3 10
+-- >>> over mins' (+1) (Time 23 59)
+-- Time {_hours = 0, _mins = 0}
+
+---------------
+-- Promotion --
+---------------
+data Promotion a = Promotion
+  { _item ∷ a,
+    _discountPercentage ∷ Double
+  }
+  deriving (Show)
+
+item ∷ Lens (Promotion a) (Promotion b) a b
+item = lens getter setter
+  where
+    getter ∷ Promotion a → a
+    getter = _item
+
+    setter ∷ Promotion a → b → Promotion b
+    setter promo newItem = promo {_item = newItem}
+
+-- |
+-- >>> let peachPromo = Promotion "A really delicious Peach" 25.0
+-- >>> peachPromo
+-- Promotion {_item = "A really delicious Peach", _discountPercentage = 25.0}
+
+-- |
+-- let peachPromo = Promotion "A really delicious Peach" 25.0
+-- :t peachPromo
+-- peachPromo ∷ Promotion [Char]
+
+-- |
+-- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
+-- :t buffyFigurines
+-- buffyFigurines ∷ [[Char]]
+
+-- |
+-- >>> let peachPromo = Promotion "A really delicious Peach" 25.0
+-- >>> let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
+-- >>> let buffyPromo = set item buffyFigurines peachPromo
+-- >>> buffyPromo
+-- Promotion {_item = ["Buffy","Angel","Willow","Giles"], _discountPercentage = 25.0}
+
+-- |
+-- let peachPromo = Promotion "A really delicious Peach" 25.0
+-- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
+-- let buffyPromo = set item buffyFigurines peachPromo
+-- :t buffyPromo
+-- buffyPromo ∷ Promotion [[Char]]
+
+-----------------
+-- Preferences --
+-----------------
+data Preferences a = Preferences
+  { _best ∷ a,
+    _worst ∷ a
+  }
+  deriving (Show)
+
+------------------
+-- Nested Types --
+------------------
+data Person = Person
+  { _fullName ∷ String,
+    _address ∷ Address
+  }
+  deriving (Show)
+
+data Address = Address
+  { _streetAddress ∷ StreetAddress,
+    _city ∷ String,
+    _country ∷ String
+  }
+  deriving (Show)
+
+data StreetAddress = StreetAddress
+  { _streetNumber ∷ String,
+    _streetName ∷ String
+  }
+  deriving (Show)
+
+makeLenses ''Person
+makeLenses ''Address
+makeLenses ''StreetAddress
+
+sherlock ∷ Person
+sherlock =
+  Person
+    { _fullName = "S. Holmes",
+      _address =
+        Address
+          { _streetAddress =
+              StreetAddress
+                { _streetNumber = "221B",
+                  _streetName = "Baker Street"
+                },
+            _city = "London",
+            _country = "England"
+          }
+    }
+
+-- using standard record update syntax to change street number
+setStreetNumber ∷ String → Person → Person
+setStreetNumber newStreetAddress person =
+  let existingAddress = _address person
+      existingStreetAddress = _streetAddress existingAddress
+   in person
+        { _address =
+            existingAddress
+              { _streetAddress =
+                  existingStreetAddress
+                    { _streetNumber = newStreetAddress
+                    }
+              }
+        }
+
+-- |
+-- >>> setStreetNumber "221A" sherlock
+-- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
+
+--------------------------------
+-- Composing Update Functions --
+--------------------------------
+
+-- Each of these functions accepts a function for modifying a single field and returns a modifying function over the larger record.
+
+-- Update a Person's Address
+updateAddress ∷ (Address → Address) → (Person → Person)
+updateAddress modify existingPerson = existingPerson {_address = modify . _address $ existingPerson}
+
+-- Update a Street Address within an Address
+updateStreetAddress ∷ (StreetAddress → StreetAddress) → (Address → Address)
+updateStreetAddress modify existingAddress = existingAddress {_streetAddress = modify . _streetAddress $ existingAddress}
+
+-- Update a Street Number within a Streed Address
+updateStreetNumber ∷ (String → String) → (StreetAddress → StreetAddress)
+updateStreetNumber modify existingStreetAddress = existingStreetAddress {_streetNumber = modify . _streetNumber $ existingStreetAddress}
+
+-- Terminology:
+-- modifier ∷ (a → a)
+-- updater ∷ (a → a) → (s → s)
+-- e.g. updateAddress = updater, (Address → Address) = modifier
+
+-- |
+-- Composing two updateres creates a new updater:
+-- :t (updateStreetAddress . updateStreetNumber)
+-- (updateStreetAddress . updateStreetNumber) ∷ (String → String) → Address → Address
+
+-- |
+-- :t (updateAddress . updateStreetAddress . updateStreetNumber)
+-- (updateAddress . updateStreetAddress . updateStreetNumber) ∷ (String → String) → Person → Person
+
+-- |
+-- >>> (updateAddress . updateStreetAddress . updateStreetNumber) (const "221A") sherlock
+-- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
+
+-- |
+-- address ∷ Lens' Person Address
+-- :t address
+-- address ∷ Functor f ⇒ (Address → f Address) → Person → f Person
+
+-- |
+-- streetAddress ∷ Lens' Address StreetAddress
+-- :t streetAddress
+-- streetAddress ∷ Functor f ⇒ (StreetAddress → f StreetAddress) → Address → f Address
+
+-- |
+-- streetNumber ∷ StreetAddress String
+-- :t streetNumber
+-- streetNumber ∷ Functor f ⇒ (String → f String) → StreetAddress → f StreetAddress
+
+-- |
+-- Lenses Compose:
+-- address . streetAddress . streetNumber ∷ Lens' Person String
+-- :t address . streetAddress . streetNumber
+-- address . streetAddress . streetNumber ∷ Functor f ⇒ (String → f String) → Person → f Person
+
+----------
+-- Game --
+----------
+
+-- Some dead-simple types which represent our game
+data Player = Player deriving (Show)
+
+data Wool = Wool deriving (Show)
+
+data Sweater = Sweater deriving (Show)
+
+data Item a = Item
+  { _material ∷ a,
+    _amount ∷ Int
+  }
+  deriving (Show)
+
+makeLenses ''Item
+
+-- This generates the following lenses:
+-- material ∷ Lens (Item a) (Item b) a b
+-- amount ∷ Lens' (Item a) Int
+
+weave ∷ Wool → Sweater
+weave Wool = Sweater
+
+gameState ∷ (Player, Item Wool)
+gameState = (Player, Item Wool 5)
+
+-- |
+-- >>> over (_2 . material) weave gameState
+-- (Player,Item {_material = Sweater, _amount = 5})
