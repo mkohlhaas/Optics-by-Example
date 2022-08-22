@@ -1302,3 +1302,260 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- "Alyson Hannigan" is in both shows.
 -- >>> foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (\n → M.singleton n 1) tvShows
 -- fromList [("Alyson Hannigan",2),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
+
+------------------------
+-- Higher Order Folds --
+------------------------
+
+-- |
+-- >>> [1, 2, 3, 4] ^.. taking 2 folded
+-- [1,2]
+
+-- |
+-- >>> [1, 2, 3, 4] ^.. dropping 2 folded
+-- [3,4]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . taking 2 folded
+-- [1,2,10,20,100,200]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. taking 2 folded
+-- [[1,2,3],[10,20,30]]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded
+-- [[1,2,3],[10,20,30],[100,200,300]]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. both . taking 3 folded
+-- "AlbDum"
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded
+-- [[1,2,3],[10,20,30],[100,200,300]]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. (folded . folded)
+-- [1,2,3,10,20,30,100,200,300]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. taking 2 (folded . folded)
+-- [1,2]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. folded
+-- ["Dumbledore"]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. both . folded
+-- "AlbusDumbledore"
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. taking 3 (both . folded)
+-- "Alb"
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. taking 3 both . folded
+-- "AlbusDumbledore"
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. (taking 2 folded)
+-- [[1,2,3],[10,20,30]]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. (taking 2 folded) . folded
+-- [1,2,3,10,20,30]
+
+-- |
+-- >>> (["Albus", "Dumbledore"], ["Severus", "Snape"]) ^.. taking 3 (both . folded)
+-- ["Albus","Dumbledore","Severus"]
+
+-- |
+-- >>> (["Albus", "Dumbledore"], ["Severus", "Snape"]) ^.. taking 3 (both . folded) . folded
+-- "AlbusDumbledoreSeverus"
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. dropping 2 (folded . folded)
+-- [3,10,20,30,100,200,300]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . dropping 2 folded
+-- [3,30,300]
+
+-- |
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. dropping 2 folded . folded
+-- [100,200,300]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. both . dropping 2 folded
+-- "busmbledore"
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. both . folded
+-- "AlbusDumbledore"
+
+-- |
+-- >>> [1, 2, 3] ^.. backwards folded
+-- [3,2,1]
+
+-- |
+-- >>> ("one", "two") ^.. backwards both
+-- ["two","one"]
+
+-- |
+-- >>> [(1, 2), (3, 4)] ^.. folded . both
+-- [1,2,3,4]
+
+-- |
+-- >>> [(1, 2), (3, 4)] ^.. backwards (folded . both)
+-- [4,3,2,1]
+
+-- |
+-- >>> [(1, 2), (3, 4)] ^.. backwards folded . both
+-- [3,4,1,2]
+
+-- |
+-- >>> [(1, 2), (3, 4)] ^.. folded . backwards both
+-- [2,1,4,3]
+
+-- |
+-- >>> [1, 5, 15, 5, 1] ^.. takingWhile (<10) folded
+-- [1,5]
+
+-- |
+-- >>> [1..100] ^.. takingWhile (<10) folded
+-- [1,2,3,4,5,6,7,8,9]
+
+-- |
+-- >>> [1..] ^.. takingWhile (<10) folded
+-- [1,2,3,4,5,6,7,8,9]
+
+-- |
+-- >>> [1..100] ^.. droppingWhile (<90) folded
+-- [90,91,92,93,94,95,96,97,98,99,100]
+
+-- |
+-- >>> [1, 5, 15, 5, 1] ^.. droppingWhile (<10) folded
+-- [15,5,1]
+
+---------------------
+-- Filtering Folds --
+---------------------
+
+-- |
+-- >>> [1, 2, 3, 4] ^.. folded . filtered even
+-- [2,4]
+
+-- |
+-- >>> ["apple", "passionfruit", "orange", "pomegranate"] ^.. folded . filtered ((> 6) . length)
+-- ["passionfruit","pomegranate"]
+
+-----------
+-- Cards --
+-----------
+
+-- A data structure to represent a single card
+data Card = Card
+  { _cardName ∷ String,
+    _aura ∷ Aura,
+    _holo ∷ Bool,
+    _moves ∷ [Move]
+  }
+  deriving (Show, Eq)
+
+-- Each card has an aura-type
+data Aura
+  = Wet
+  | Hot
+  | Spark
+  | Leafy
+  deriving (Show, Eq)
+
+-- Cards have attack moves
+data Move = Move
+  { _moveName ∷ String,
+    _movePower ∷ Int
+  }
+  deriving (Show, Eq)
+
+makeLenses ''Card
+makeLenses ''Move
+
+deck ∷ [Card]
+deck =
+  [ Card "Skwortul" {-   -} Wet {-    -} False {--} [Move "Squirt" 20],
+    Card "Scorchander" {--} Hot {-    -} False {--} [Move "Scorch" 20],
+    Card "Seedasaur" {-  -} Leafy {-  -} False {--} [Move "Allergize" 20],
+    Card "Kapichu" {-    -} Spark {-  -} False {--} [Move "Poke" 10, Move "Zap" 30],
+    Card "Elecdude" {-   -} Spark {-  -} False {--} [Move "Asplode" 50],
+    Card "Garydose" {-   -} Wet {-    -} True {- -} [Move "Gary's move" 40],
+    Card "Moisteon" {-   -} Wet {-    -} False {--} [Move "Soggy" 3],
+    Card "Grasseon" {-   -} Leafy {-  -} False {--} [Move "Leaf Cut" 30],
+    Card "Spicyeon" {-   -} Hot {-    -} False {--} [Move "Capsaicisize" 40],
+    Card "Sparkeon" {-   -} Spark {-  -} True {- -} [Move "Shock" 40, Move "Battery" 50]
+  ]
+
+-- |
+-- How many Spark Cards do I have?
+-- >>> lengthOf (folded . aura . filtered (== Spark)) deck
+-- 3
+
+-- |
+-- How many moves have an attack power above 30?
+-- >>> lengthOf (folded . moves . folded . movePower . filtered (> 30)) deck
+-- 5
+
+-- |
+-- >>> lengthOf (folded . moves ) deck
+-- 10
+
+-- |
+-- >>> deck ^.. folded . moves . folded . movePower
+-- [20,20,20,10,30,50,40,3,30,40,40,50]
+
+-- |
+
+--- List all cards which have ANY move with an attack power greater than 40
+-- >>> deck ^.. folded . filtered (anyOf (moves . folded . movePower) (> 40)) . cardName
+-- ["Elecdude","Sparkeon"]
+
+-- |
+-- How many moves do my Spark cards have in total?
+-- >>> lengthOf ( folded . filtered ((== Spark) . _aura) . moves . folded ) deck
+-- 5
+
+-- |
+-- List all my Spark Moves with a power greater than 30
+-- >>> deck ^.. folded . filtered ((== Spark) . _aura) . moves . folded . filtered ((> 30) . _movePower) . moveName
+-- ["Asplode","Shock","Battery"]
+
+-- |
+-- Using `filteredBy` we can pass a fold instead of a predicate!
+-- We can continue to think in folds and keep reading left-to-right.
+-- >>> deck ^.. folded . filteredBy (aura . only Spark) . moves . folded . filteredBy (movePower . filtered (>30)) . moveName
+-- ["Asplode","Shock","Battery"]
+
+-- `only` is a utility fold.
+-- It accepts a reference value and will return a fold which yields a `()` if and only if the input value is equal to the reference value.
+
+-- |
+-- >>> 1 ^? only 1
+-- Just ()
+
+-- |
+-- >>> 2 ^? only 1
+-- Nothing
+
+-- |
+-- >>> has (only "needle") "needle"
+-- True
+
+-- |
+-- >>> has (only "needle") "haystack"
+-- False
+
+-- |
+-- Get the holographic card which has the largest number of moves
+-- >>> maximumByOf (folded . filtered _holo) (comparing (lengthOf moves)) deck
+-- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
