@@ -20,6 +20,14 @@ import Numeric.Lens (negated)
 main ∷ IO ()
 main = putStrLn "Hello Optics by Example!"
 
+--------------------------------------------------------------------------------------------
+--                                         Optics                                         --
+--------------------------------------------------------------------------------------------
+
+----------------------------------
+-- Practical Optics at a Glance --
+----------------------------------
+
 -- |
 -- Update portions of immutable data structures
 -- >>> set _3 False ('a', 'b', 'c')
@@ -35,6 +43,10 @@ main = putStrLn "Hello Optics by Example!"
 -- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
 -- >>> over (traversed . filtered ((>10) . length)) (\story → take 10 story ++ "...") stories
 -- ["This one t...","Nuff!","This is a ..."]
+
+------------------------------------
+-- Impractical Optics at a Glance --
+------------------------------------
 
 -- |
 -- Summarize a list of numbers, subtracting the 'Left's, adding the 'Right's!
@@ -70,6 +82,14 @@ main = putStrLn "Hello Optics by Example!"
 -- prompts = ("What is your name?" , "What is your quest?" , "What is your favourite color?")
 -- prompts & each %%~ (\prompt → putStrLn prompt >> getLine)
 
+--------------------------------------------------------------------------------------------
+--                                         Lenses                                         --
+--------------------------------------------------------------------------------------------
+
+-------------
+-- Anatomy --
+-------------
+
 -- |
 -- >>> view (_2 . _1) (42, ("hello", False))
 -- "hello"
@@ -90,6 +110,10 @@ main = putStrLn "Hello Optics by Example!"
 -- >>> foldOf (both . each) (["super", "cali"],["fragilistic", "expialidocious"])
 -- "supercalifragilisticexpialidocious"
 
+----------------------------
+-- Viewing through Lenses --
+----------------------------
+
 -- |
 -- >>> view _1 ('a', 'b')
 -- 'a'
@@ -97,6 +121,10 @@ main = putStrLn "Hello Optics by Example!"
 -- |
 -- >>> view _2 ('a', 'b')
 -- 'b'
+
+----------------------------
+-- Setting through a Lens --
+----------------------------
 
 -- |
 -- >>> set _1 'x' ('a', 'b')
@@ -113,6 +141,10 @@ main = putStrLn "Hello Optics by Example!"
 -- |
 -- >>> _numCrew purplePearl
 -- 38
+
+----------------------------------------
+-- Building a Lens for a Record Field --
+----------------------------------------
 
 ----------
 -- Ship --
@@ -142,6 +174,10 @@ makeLenses ''Ship
 -- >>> purplePearl
 -- Ship {_name = "Purple Pearl", _numCrew = 38}
 
+-------------------------------------------
+-- Getting and Setting with a Field Lens --
+-------------------------------------------
+
 -- |
 -- >>> set numCrew 41 purplePearl
 -- Ship {_name = "Purple Pearl", _numCrew = 41}
@@ -150,6 +186,10 @@ makeLenses ''Ship
 -- >>> set name "More Purple Pearl" purplePearl
 -- Ship {_name = "More Purple Pearl", _numCrew = 38}
 
+----------------------------------
+-- Modifying Fields with a Lens --
+----------------------------------
+
 -- |
 -- >>> over numCrew (+3) purplePearl
 -- Ship {_name = "Purple Pearl", _numCrew = 41}
@@ -157,6 +197,10 @@ makeLenses ''Ship
 -- |
 -- >>> set numCrew (view numCrew purplePearl + 3) purplePearl
 -- Ship {_name = "Purple Pearl", _numCrew = 41}
+
+---------------
+-- Lens Laws --
+---------------
 
 -- |
 -- 1st lens law:
@@ -204,6 +248,10 @@ makeLenses ''Ship
 -- >>> let structure = ("Beer", "Tea")
 -- >>> set _1 value2 (set _1 value1 structure) == set _1 value2 structure
 -- True
+
+---------------------
+-- Case Study: msg --
+---------------------
 
 ---------
 -- Err --
@@ -275,6 +323,10 @@ msg = lens getMsg setMsg
 -- >>> set msg value2 (set msg value1 err) == set msg value2 err
 -- True
 
+-----------------------------
+-- Case Study: lensProduct --
+-----------------------------
+
 -------------
 -- Session --
 -------------
@@ -334,6 +386,15 @@ alongsideSession = lensProduct userId id
 -- >>> let newSession = session {_userId = "USER-5678"}
 -- >>> view alongsideSession (set alongsideSession ("USER-9999", newSession) session) == ("USER-9999", newSession)
 -- False
+
+--------------------
+-- Virtual Fields --
+--------------------
+
+-----------------------------
+-- Writing a Virtual Field --
+-----------------------------
+
 data Temperature = Temperature
   { _location ∷ String,
     _celsius ∷ Float
@@ -383,9 +444,7 @@ fahrenheitToCelsius f = (f - 32) * (5 / 9)
 -- >>> over celsius (fahrenheitToCelsius . (+18) . celsiusToFahrenheit) temp
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
--------------------
--- Virtual Field --
--------------------
+-- virtual field
 fahrenheit ∷ Lens' Temperature Float
 fahrenheit = lens getter setter
   where
@@ -407,9 +466,11 @@ fahrenheit = lens getter setter
 -- >>> over fahrenheit (+ 18) temp
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
-----------
--- Time --
-----------
+------------------------------------------------
+-- Data Correction and Maintaining Invariants --
+------------------------------------------------
+
+-- including correction logic in lenses
 data Time = Time
   { _hours ∷ Int,
     _mins ∷ Int
@@ -481,9 +542,14 @@ mins' = lens getter setter
 -- >>> over mins' (+1) (Time 23 59)
 -- Time {_hours = 0, _mins = 0}
 
----------------
--- Promotion --
----------------
+--------------------------------------------------------------------------------------------
+--                                 Polymorphic Optics                                     --
+--------------------------------------------------------------------------------------------
+
+-----------------------------------------------------
+-- Changing type variables with polymorphic lenses --
+-----------------------------------------------------
+
 data Promotion a = Promotion
   { _item ∷ a,
     _discountPercentage ∷ Double
@@ -536,6 +602,10 @@ data Preferences a = Preferences
     _worst ∷ a
   }
   deriving (Show)
+
+----------------------
+-- Composing Lenses --
+----------------------
 
 ------------------
 -- Nested Types --
@@ -616,6 +686,10 @@ updateStreetAddress modify existingAddress = existingAddress {_streetAddress = m
 updateStreetNumber ∷ (String → String) → (StreetAddress → StreetAddress)
 updateStreetNumber modify existingStreetAddress = existingStreetAddress {_streetNumber = modify . _streetNumber $ existingStreetAddress}
 
+----------------------
+-- Composing Lenses --
+----------------------
+
 -- Terminology:
 -- modifier ∷ (a → a)
 -- updater ∷ (a → a) → (s → s)
@@ -655,6 +729,10 @@ updateStreetNumber modify existingStreetAddress = existingStreetAddress {_street
 -- :t address . streetAddress . streetNumber
 -- address . streetAddress . streetNumber ∷ Functor f ⇒ (String → f String) → Person → f Person
 
+--------------------------------
+-- How do Lens Types Compose? --
+--------------------------------
+
 ----------
 -- Game --
 ----------
@@ -688,6 +766,10 @@ gameState = (Player, Item Wool 5)
 -- >>> over (_2 . material) weave gameState
 -- (Player,Item {_material = Sweater, _amount = 5})
 
+--------------------------------------------------------------------------------------------
+--                                       Operators                                        --
+--------------------------------------------------------------------------------------------
+
 --------------------
 -- Lens Operators --
 --------------------
@@ -701,6 +783,10 @@ makeLenses ''Boat
 serenity ∷ Boat
 serenity = Boat (Payload 50000 "Livestock")
 
+--------------------
+-- view a.k.a. ^. --
+--------------------
+
 -- |
 -- >>> view (payload . cargo) serenity
 -- "Livestock"
@@ -712,6 +798,10 @@ serenity = Boat (Payload 50000 "Livestock")
 -- |
 -- >>> serenity^.payload.cargo
 -- "Livestock"
+
+-------------------
+-- set a.k.a. .∼ --
+-------------------
 
 -- |
 -- >>> set (payload . cargo) "Medicine" serenity
@@ -727,10 +817,18 @@ serenity = Boat (Payload 50000 "Livestock")
 -- >>> serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
 -- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
 
+------------------------------
+-- Chaining Many Operations --
+------------------------------
+
 -- |
 -- Using traditional actions names:
 -- >>> serenity & set (payload . cargo) "Chocolate" & set (payload . weightKilos) 2310
 -- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+
+--------------------------
+-- Using %∼ a.k.a. over --
+--------------------------
 
 -- |
 -- %~ = over
@@ -738,7 +836,7 @@ serenity = Boat (Payload 50000 "Livestock")
 -- Boat {_payload = Payload {_weightKilos = 49000, _cargo = "Chocolate"}}
 
 ----------------------------
--- Operator Hieroglyphics --
+-- Learning Hieroglyphics --
 ----------------------------
 
 -- |
@@ -773,6 +871,10 @@ serenity = Boat (Payload 50000 "Livestock")
 -- >>> ("abra", 30) & _1 <>~ "cadabra"
 -- ("abracadabra",30)
 
+---------------
+-- Modifiers --
+---------------
+
 -----------------
 -- Thermometer --
 -----------------
@@ -797,6 +899,12 @@ makeLenses ''Thermometer
 -- >>> Thermometer 20 & temperature <<+~ 15
 -- (20,Thermometer {_temperature = 35})
 
+---------------------------------------------
+-- When to use operators vs named actions? --
+---------------------------------------------
+
+-- Author finds it nicer to use the named versions when partially applying lens expressions, and use the operator versions the rest of the time.
+
 -- |
 -- >>> map (view _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
 -- ["Star","SquarePants"]
@@ -815,9 +923,13 @@ makeLenses ''Thermometer
 -- >>> map (_2 %~ reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
 -- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
 
------------
--- Folds --
------------
+--------------------------------------------------------------------------------------------
+--                                         Folds                                          --
+--------------------------------------------------------------------------------------------
+
+------------------------------------------
+-- Focusing All Elements of a Container --
+------------------------------------------
 
 data Role
   = Gunner
@@ -845,6 +957,10 @@ roster =
       CrewMember "Salty Steve" {-     -} PowderMonkey {--} ["Charcuterie"],
       CrewMember "One-eyed Jack" {-   -} Navigator {-   -} []
     ]
+
+------------------------
+-- Collapsing the Set --
+------------------------
 
 crewMembers ∷ Fold (S.Set CrewMember) CrewMember
 crewMembers = folded
@@ -886,6 +1002,13 @@ crewRole = role
 -- >>> jerry ^. role
 -- PowderMonkey
 
+----------------------------------
+-- Collecting Focuses as a List --
+----------------------------------
+
+-- Lenses must focus exactly one value, whereas folds can focus many.
+-- Similarly, view (a.k.a. (^.)) always retrieves exactly one thing, but toListOf (a.k.a. (^..)) retrieves zero or more values in a list!
+
 -- |
 -- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
 -- >>> jerry ^.. role
@@ -894,9 +1017,19 @@ crewRole = role
 -- When we use a `lens` as a `fold` we can mentally substitute the types like this:
 -- `Lens' s a` becomes `Fold s a`
 
+---------------------
+-- Composing Folds --
+---------------------
+
 -- |
 -- >>> roster ^.. folded . role
 -- [Gunner,PowderMonkey,Navigator,PowderMonkey]
+
+-----------------------------------
+-- Foundational Fold Combinators --
+-----------------------------------
+
+-- both & each
 
 -- |
 -- `both` on tuples focuses both at once
@@ -967,6 +1100,10 @@ myCrew =
 -- Rule: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! --
 ---------------------------------------------------------------------------------------------------------------------------------------
 
+------------------------
+-- Mapping over Folds --
+------------------------
+
 -- The to helper is pretty simple, it converts a function directly into a fold!
 
 -- |
@@ -991,9 +1128,10 @@ myCrew =
 -- >>> myCrew ^.. allCrewMembers . to getName
 -- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
 
-----------------
--- Crew Names --
-----------------
+----------------------------------------------------
+-- Combining Multiple Folds on the Same Structure --
+----------------------------------------------------
+
 crewNames ∷ Fold ShipCrew Name
 crewNames =
   folding
@@ -1007,11 +1145,12 @@ crewNames =
 -- >>> myCrew ^.. crewNames . to getName
 -- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
 
-------------------------
--- Queries with Folds --
-------------------------
+--------------------------------
+-- Writing Queries with Folds --
+--------------------------------
 
 -- |
+-- Does my fold contain a given element?
 -- >>> elemOf folded 3 [1, 2, 3, 4]
 -- True
 
@@ -1020,6 +1159,7 @@ crewNames =
 -- False
 
 -- |
+-- Do ANY focuses match a predicate?
 -- >>> anyOf folded even [1, 2, 3, 4]
 -- True
 
@@ -1028,6 +1168,7 @@ crewNames =
 -- False
 
 -- |
+-- Do ALL focuses match a predicate?
 -- >>> allOf folded even [1, 2, 3, 4]
 -- False
 
@@ -1036,6 +1177,7 @@ crewNames =
 -- True
 
 -- |
+-- Find the first element matching a predicate
 -- >>> findOf folded even [1, 2, 3, 4]
 -- Just 2
 
@@ -1044,6 +1186,7 @@ crewNames =
 -- Nothing
 
 -- |
+-- Does my fold have any elements?
 -- >>> has folded []
 -- False
 
@@ -1060,18 +1203,23 @@ crewNames =
 -- False
 
 -- |
+-- How many focuses are there?
 -- >>> lengthOf folded [1, 2, 3, 4]
 -- 4
 
 -- |
+-- What’s the sum of my focuses?
 -- >>> sumOf folded [1, 2, 3, 4]
 -- 10
 
 -- |
+-- What’s the product of my focuses?
 -- >>> productOf folded [1, 2, 3, 4]
 -- 24
 
 -- |
+-- What’s the first focus?
+-- `firstOf`, `preview`, and `^?` are all effectively equivalent; use whichever you like.
 -- >>> firstOf folded []
 -- Nothing
 
@@ -1088,28 +1236,33 @@ crewNames =
 -- Just 1
 
 -- |
+-- What’s the last focus?
 -- >>> lastOf folded [1, 2, 3, 4]
 -- Just 4
 
 -- |
+-- Find the minimum focus
 -- >>> minimumOf folded [2, 1, 4, 3]
 -- Just 1
-
--- |
--- >>> maximumOf folded [2, 1, 4, 3]
--- Just 4
 
 -- |
 -- >>> minimumOf folded []
 -- Nothing
 
 -- |
+-- Find the maximum focus
+-- >>> maximumOf folded [2, 1, 4, 3]
+-- Just 4
+
+-- |
 -- >>> maximumOf folded []
 -- Nothing
 
---------------
--- TV Shows --
---------------
+------------------------
+-- Queries Case Study --
+------------------------
+
+-- TV Shows
 
 data Actor = Actor
   { _actorName ∷ String,
@@ -1222,6 +1375,10 @@ showActor actor = _actorName actor <> ": " <> show (calcAge actor)
 -- >>> execState (traverseOf_ folded (modify . const (+ 1)) tvShows) 0
 -- 2
 
+----------------------------
+-- Combining Fold Results --
+----------------------------
+
 -- |
 -- >>> (Sum 1, Sum 32) <> (Sum 1, Sum 20)
 -- (Sum {getSum = 2},Sum {getSum = 52})
@@ -1247,7 +1404,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- 57.2
 
 ---------------------------
--- Using ‘view’ on folds --
+-- Using ‘view’ on Folds --
 ---------------------------
 
 -- A very common mistake when people get started with folds is to accidentally use (^.) or view on a
@@ -1306,6 +1463,10 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 ------------------------
 -- Higher Order Folds --
 ------------------------
+
+----------------------
+-- Taking, Dropping --
+----------------------
 
 -- |
 -- >>> [1, 2, 3, 4] ^.. taking 2 folded
@@ -1395,6 +1556,10 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> ("Albus", "Dumbledore") ^.. both . folded
 -- "AlbusDumbledore"
 
+---------------
+-- Backwards --
+---------------
+
 -- |
 -- >>> [1, 2, 3] ^.. backwards folded
 -- [3,2,1]
@@ -1418,6 +1583,10 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- |
 -- >>> [(1, 2), (3, 4)] ^.. folded . backwards both
 -- [2,1,4,3]
+
+--------------------------------
+-- TakingWhile, DroppingWhile --
+--------------------------------
 
 -- |
 -- >>> [1, 5, 15, 5, 1] ^.. takingWhile (<10) folded
