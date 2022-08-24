@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 module Main where
 
 import Control.Applicative
@@ -8,6 +10,7 @@ import Control.Monad.State
 import Data.Bits.Lens (bitAt)
 import qualified Data.ByteString as BS
 import Data.Char
+import Data.Either.Validation
 import Data.List (sort)
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -1728,3 +1731,666 @@ deck =
 -- Get the holographic card which has the largest number of moves
 -- >>> maximumByOf (folded . filtered _holo) (comparing (lengthOf moves)) deck
 -- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
+
+--------------------------------------------------------------------------------------------
+--                                       Traversals                                       --
+--------------------------------------------------------------------------------------------
+
+-----------------------------------------------
+-- How do Traversals Fit into the Hierarchy? --
+-----------------------------------------------
+
+--            | Get    | Set/Modify | Traverse
+-----------------------------------------------
+-- Lens       | Single |   Single   | Single
+-- Fold       |  Many  |     ✗      |   ✗
+-- Traversal  |  Many  |   Many     | Many
+
+-- A Traversal can be used as a Fold but not vice versa.
+-- A Fold can only be used as a Fold.
+-- A Lens can be used as anything.
+--
+-- can be used as | Lens | Fold | Traversal
+-- -------------- | -----| -----| ----------
+-- Lens           |  ✓   |  ✓   |    ✓
+-- Fold           |  ✗   |  ✓   |    ✗
+-- Traversal      |  ✗   |  ✓   |    ✓
+
+----------------------------
+-- From Fold to Traversal --
+----------------------------
+
+-- |
+-- we can use the traversal as a fold
+-- >>> ("Bubbles", "Buttercup") ^.. both
+-- ["Bubbles","Buttercup"]
+
+-- |
+-- modify the focuses using the over action: (%∼)
+-- >>> ("Bubbles", "Buttercup") & both %~ (++ "!")
+-- ("Bubbles!","Buttercup!")
+
+-- |
+-- using set (.∼) on a traversal
+-- >>> ("Bubbles", "Buttercup") & both .~ "Blossom"
+-- ("Blossom","Blossom")
+
+-- |
+-- changing type of tuple (polymorphic traversal)
+-- >>> ("Bubbles", "Buttercup") & both %~ length
+-- (7,9)
+
+-- |
+-- each is also a traversal
+-- >>> (1, 2, 3) & each %~ (*10)
+-- (10,20,30)
+
+-- |
+-- ("Here's Johnny" ∷ T.Text) & each %~ toUpper
+-- "HERE'S JOHNNY"
+
+-- |
+-- you can't change what Text is made of
+-- ("Houston we have a problem" ∷ T.Text) & each .~ (22 ∷ Int)
+-- Couldn't match expected type ‘Text’ with actual type ‘[Char]’
+-- Couldn't match type ‘Int’ with ‘Char’ arising from a use of ‘each’
+
+-- |
+-- >>> [1, 2, 3, 4, 5] & taking 3 traversed *~ 10
+-- [10,20,30,4,5]
+
+-- |
+-- >>> [1, 2, 3, 4, 5] & dropping 3 traversed *~ 10
+-- [1,2,3,40,50]
+
+-- |
+-- >>> "once upon a time - optics became mainstream" & takingWhile (/= '-') traversed %~ toUpper
+-- "ONCE UPON A TIME - optics became mainstream"
+
+-- |
+-- Multiply all even numbers by 10
+-- >>> [1, 2, 3, 4, 5] & traversed . filtered even *~ 10
+-- [1,20,3,40,5]
+
+-- |
+-- `filtered` is an extremely powerful tool, it alters the exact same elements which would be focused when you use it in a fold.
+-- Reverse only the long strings
+-- >>> ("short", "really long") & both . filtered ((> 5) . length) %~ reverse
+-- ("short","gnol yllaer")
+
+---------------------------
+-- Traversal Combinators --
+---------------------------
+
+--------------------------------------------
+-- Traversing Each Element of a Container --
+--------------------------------------------
+
+-- |
+-- cannot modify a fold
+-- [1, 2, 3] & folded %~ (*10)
+-- Could not deduce (Contravariant Identity)
+--   arising from a use of ‘folded’
+
+-- `folded` can be used on more container types (like `Set`), but `traversed` has strictly more power (it can set and update).
+
+-- |
+-- >>> [1, 2, 3] & traversed *~ 10
+-- [10,20,30]
+
+-- |
+-- Tuples are traversable over their last slot
+-- >>> ("Batman", "Superman") & traversed %~ take 3
+-- ("Batman","Sup")
+
+-- |
+-- >>> let powerLevels = M.fromList [("Gohan", 710) , ("Goku", 9001) , ("Krillin", 5000) , ("Piccolo", 408)]
+-- >>> powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
+-- fromList [("Gohan","710"),("Goku","Over 9000"),("Krillin","5000"),("Piccolo","408")]
+
+-- |
+-- >>> import Data.Tree
+-- >>> let opticsTree = Node "Lens" [Node "Fold" [], Node "Traversal" []]
+-- >>> opticsTree & traversed %~ reverse
+-- Node {rootLabel = "sneL", subForest = [Node {rootLabel = "dloF", subForest = []},Node {rootLabel = "lasrevarT", subForest = []}]}
+
+----------------------
+-- More Combinators --
+----------------------
+
+-- |
+-- as folds `worded` works pretty much the same as `words`
+-- >>> "I'll be back!" ^.. worded
+-- ["I'll","be","back!"]
+
+-- |
+-- the same for lined
+-- >>> "Run\nForrest\nRun" ^.. lined
+-- ["Run","Forrest","Run"]
+
+-- |
+-- as traversal we can also update
+-- Surround each word with '*'s
+-- result is a String
+-- >>> "blue suede shoes" & worded %~ \s → "*" ++ s ++ "*"
+-- "*blue* *suede* *shoes*"
+
+-- |
+-- Capitalize each word
+-- >>> "blue suede shoes" & worded %~ \(x:xs) → toUpper x : xs
+-- "Blue Suede Shoes"
+
+-- |
+-- Add a "#" to the start of each line:
+-- >>> "blue\nsuede\nshoes" & lined %~ ('#':)
+-- "#blue\n#suede\n#shoes"
+
+-- |
+-- Mapping the identity function still has the white-space collapsing side-effects of `unwords`.
+-- newlines are getting lost
+-- >>> "blue \n suede \n \n shoes" & worded %~ id
+-- "blue suede shoes"
+
+---------------------------------------
+-- Traversing Multiple Paths at Once --
+---------------------------------------
+
+-- |
+-- >>> let dinos = ("T-Rex", (42, "Stegosaurus"))
+-- >>> dinos ^.. beside id _2
+-- ["T-Rex","Stegosaurus"]
+
+-- |
+-- We can provide a different path to focus Ints for each half of the tuple.
+-- >>> let numbers = ([(1, 2), (3, 4)], [5, 6, 7])
+-- >>> numbers ^.. beside (traversed . both) traversed
+-- [1,2,3,4,5,6,7]
+
+-- |
+-- >>> ("T-Rex", ("Ankylosaurus", "Stegosaurus")) ^.. beside id both
+-- ["T-Rex","Ankylosaurus","Stegosaurus"]
+
+-- |
+-- We can modify all characters inside both halves of the tuple
+-- Each half of the tuple has a different path to focus the characters
+-- >>> ("Cowabunga", ["let's", "order", "pizza"]) & beside traversed (traversed . traversed) %~ toUpper
+-- ("COWABUNGA",["LET'S","ORDER","PIZZA"])
+
+-- |
+-- Every `Bitraversable` can be used with `beside`.
+-- >>> Left (1, 2) & beside both traversed %~ negate
+-- Left (-1,-2)
+
+-- |
+-- >>> Right [3, 4] & beside both traversed %~ negate ∷ Either (Int, Int) [Int]
+-- Right [-3,-4]
+
+-------------------------------------------
+-- Focusing a Specific Traversal Element --
+-------------------------------------------
+
+-- |
+-- >>> [0, 1, 2, 3, 4] ^? element 2
+-- Just 2
+
+-- |
+-- `element` can't change the container's element type.
+-- This is called a `monomorphic traversal`.
+-- >>> [0, 1, 2, 3, 4] & element 2 *~ 100
+-- [0,1,200,3,4]
+
+-- |
+-- `element` is basically `elementOf traversed`
+-- >>> [0, 1, 2, 3, 4] ^? elementOf traversed 2
+-- Just 2
+
+-- |
+-- We can get a specific element from a composition of traversals
+-- >>> [[0, 1, 2], [3, 4], [5, 6, 7, 8]] ^? elementOf (traversed . traversed) 6
+-- Just 6
+
+-- |
+-- >>> [[0, 1, 2], [3, 4], [5, 6, 7, 8]] & elementOf (traversed . traversed) 6 *~ 100
+-- [[0,1,2],[3,4],[5,600,7,8]]
+
+---------------------------
+-- Traversal Composition --
+---------------------------
+
+-- |
+-- Capitalize the first char of every word.
+-- >>> "blue suede shoes" & worded . taking 1 traversed %~ toUpper
+-- "Blue Suede Shoes"
+
+-- |
+-- Find all strings longer than 5 chars then surround each word in that string with '*'
+-- >>> ["short", "really long"] & traversed . filtered ((> 5) . length) . worded %~ \s → "*" ++ s ++ "*"
+-- ["short","*really* *long*"]
+
+-- |
+-- Add "Rich " to the names of people with more than $1000.
+-- >>> (("Ritchie", 100000), ("Archie", 32), ("Reggie", 4350)) & each . filtered ((> 1000) . snd) . _1 %~ ("Rich " ++)
+-- (("Rich Ritchie",100000),("Archie",32),("Rich Reggie",4350))
+
+-----------------------
+-- Traversal Actions --
+-----------------------
+
+-----------------------------
+-- A Primer on Traversable --
+-----------------------------
+
+-- |
+-- >>> sequenceA [Just 1, Just 2, Just 3]
+-- Just [1,2,3]
+
+-- |
+-- >>> sequenceA [Just 1, Nothing, Just 3]
+-- Nothing
+
+-- |
+-- >>> sequenceA $ Just (Left "Whoops")
+-- Left "Whoops"
+
+-- :t readMaybe
+-- readMaybe ∷ Read a ⇒ String → Maybe a
+-- 'readMaybe' is polymorphic so we need to specify a concrete result type
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> traverse readMaybe ["1", "2", "3"] ∷ Maybe [Int]
+-- Just [1,2,3]
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> traverse readMaybe ["1", "snark", "3"] ∷ Maybe [Int]
+-- Nothing
+
+-- |
+-- >>> traverse (\n → [n * 10, n * 100]) ("a", 10)
+-- [("a",100),("a",1000)]
+
+----------------------------
+-- Traverse on Traversals --
+----------------------------
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> traverseOf both readMaybe ("1", "2") ∷ Maybe (Int, Int)
+-- Just (1,2)
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> traverseOf both readMaybe ("not a number", "2") ∷ Maybe (Int, Int)
+-- Nothing
+
+-- |
+-- >>> traverseOf both (\c → [toLower c, toUpper c]) ('a', 'b')
+-- [('a','b'),('a','B'),('A','b'),('A','B')]
+
+-- |
+-- >>> traverseOf (both . traversed) (\c → [toLower c, toUpper c]) ("ab", "cd")
+-- [("ab","cd"),("ab","cD"),("ab","Cd"),("ab","CD"),("aB","cd"),("aB","cD"),("aB","Cd"),("aB","CD"),("Ab","cd"),("Ab","cD"),("Ab","Cd"),("Ab","CD"),("AB","cd"),("AB","cD"),("AB","Cd"),("AB","CD")]
+
+-- simple validation
+validateEmail ∷ String → Either String String
+validateEmail email
+  | '@' `elem` email = Right email
+  | otherwise = Left ("missing '@': " <> email)
+
+-- |
+-- >>> traverseOf (traversed . _2) validateEmail [ ("Mike", "mike@tmnt.io") , ("Raph", "raph@tmnt.io") , ("Don", "don@tmnt.io") , ("Leo", "leo@tmnt.io") ]
+-- Right [("Mike","mike@tmnt.io"),("Raph","raph@tmnt.io"),("Don","don@tmnt.io"),("Leo","leo@tmnt.io")]
+
+-- |
+-- >>> traverseOf (traversed . _2) validateEmail [ ("Mike", "mike@tmnt.io") , ("Raph", "raph.io") , ("Don", "don@tmnt.io") , ("Leo", "leo@tmnt.io") ]
+-- Left "missing '@': raph.io"
+
+-- simple validation
+validateEmail' ∷ String → Validation [String] String
+validateEmail' email
+  | '@' `elem` email = Success email
+  | otherwise = Failure ["missing '@': " <> email]
+
+-- |
+-- >>> traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph@tmnt.io"], ["don@tmnt.io", "leo@tmnt.io"])
+-- Success (["mike@tmnt.io","raph@tmnt.io"],["don@tmnt.io","leo@tmnt.io"])
+
+-- |
+-- >>> traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph.io"], ["don@tmnt.io", "leo.io"])
+-- Failure ["missing '@': raph.io","missing '@': leo.io"]
+
+-- |
+-- >>> sequenceAOf _1 (Just "Garfield", "Lasagna")
+-- Just ("Garfield","Lasagna")
+
+-- |
+-- >>> sequenceAOf _1 (Nothing, "Lasagna")
+-- Nothing
+
+-- |
+-- >>> sequenceAOf (both . traversed) ([Just "apples"], [Just "oranges"])
+-- Just (["apples"],["oranges"])
+
+-- |
+-- >>> sequenceAOf (both . traversed) ([Just "apples"], [Nothing])
+-- Nothing
+
+-----------------------------
+-- Infix `traverseOf`: %%∼ --
+-----------------------------
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> (("1", "2") & both %%~ readMaybe) ∷ Maybe (Int, Int)
+-- Just (1,2)
+
+-- |
+-- >>> import Text.Read (readMaybe)
+-- >>> (("not a number", "2") & both %%~ readMaybe) ∷ Maybe (Int, Int)
+-- Nothing
+
+-------------------------------
+-- Using Traversals Directly --
+-------------------------------
+
+-- Instead of using `traverseOf` or `%%∼,` we can often just use the traversal itself!
+
+-- |
+-- Here we use `both` directly as though it were `traverse`:
+-- >>> import Text.Read (readMaybe)
+-- >>> both readMaybe ("1", "2") ∷ Maybe (Int, Int)
+-- Just (1,2)
+
+-- I'd recommend avoiding this style; it's unnecessarily confusing, unidiomatic, and doesn't translate well to other optics libraries, but it's sometimes useful to know that it exists.
+-- The combinators help a lot with readability, so I'd recommend you use them consistently.
+
+-----------------------
+-- Custom traversals --
+-----------------------
+
+---------------------------------
+-- Optics Look like `traverse` --
+---------------------------------
+
+-- The symmetry we see in these shapes is why we can compose optics of differing types together.
+-- Every optic is actually the exact same type plus or minus constraints on <f>!
+-- As optics are composed, the constraints on <f> are gathered up.
+
+--------------------------------
+-- Our First Custom Traversal --
+--------------------------------
+
+-- Van Laarhoven optics are just a function which matches a ‘traverse-like’ signature we can write our own traversals by hand.
+
+-- Author recommends fully expanding the type signature.
+values ∷ Applicative f ⇒ (a → f b) → [a] → f [b]
+values _ [] = pure []
+values handler (a : as) = (:) <$> handler a <*> values handler as
+
+-- values handler (a : as) = liftA2 (:) (handler a) (values handler as)
+
+-- |
+-- >>> ["one", "two", "three"] ^.. values
+-- ["one","two","three"]
+
+-- |
+-- >>> ["one", "two", "three"] & values %~ reverse
+-- ["eno","owt","eerht"]
+
+-- |
+-- We should be able to do type-changing transformations too:
+-- >>> ["one", "two", "three"] & values %~ length
+-- [3,3,5]
+
+----------------------------------
+-- Traversals with Custom Logic --
+----------------------------------
+
+data Transaction
+  = Withdrawal {_moneyAmount ∷ Int}
+  | Deposit {_moneyAmount ∷ Int}
+  deriving (Show)
+
+makeLenses ''Transaction
+
+newtype BankAccount = BankAccount
+  { _transactions ∷ [Transaction]
+  }
+  deriving (Show)
+
+makeLenses ''BankAccount
+
+-- |
+-- Get all transactions
+-- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
+-- >>> aliceAccount ^.. transactions . traversed
+-- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Withdrawal {_moneyAmount = 10}]
+
+-- |
+-- Get the amounts for all transactions
+-- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
+-- >>> aliceAccount ^.. transactions . traversed . moneyAmount
+-- [100,20,10]
+
+---------------------------------------
+-- Case Study: Transaction Traversal --
+---------------------------------------
+
+-- The handler focuses elements, pure ignores them.
+deposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction]
+deposits _ [] = pure []
+deposits handler (Withdrawal amt : rest) = (Withdrawal amt :) <$> deposits handler rest
+deposits handler (Deposit amt : rest) = liftA2 (:) (Deposit <$> handler amt) (deposits handler rest)
+
+-- |
+-- Get all the Deposit transaction amounts:
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits
+-- [10,30]
+
+-- |
+-- Multiply the amounts of all Deposits by 10
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits *~ 10
+-- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
+
+-- WARNING, when focusing a subset of a list like this our first thought is often to look at using a helper
+-- like filter to implement the traversal; but you need to be careful! filter is a destructive operation,
+-- it throws away any parts of the list which don't match.
+
+isDeposit ∷ Transaction → Bool
+isDeposit (Deposit _) = True
+isDeposit _ = False
+
+badDeposits ∷ Traversal' [Transaction] Int
+badDeposits handler ts = traverse go (filter isDeposit ts)
+  where
+    go (Deposit amt) = Deposit <$> handler amt
+    go (Withdrawal _) = error "This shouldn't happen"
+
+-- |
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. badDeposits
+-- [10,30]
+
+-- |
+-- The `Withdrawal` is lost.
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] & badDeposits *~ 10
+-- [Deposit {_moneyAmount = 100},Deposit {_moneyAmount = 300}]
+
+-- Using existing traversals.
+deposits' ∷ Traversal' [Transaction] Int
+deposits' = traversed . filtered isDeposit . moneyAmount
+
+-- |
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits'
+-- [10,30]
+
+-- |
+-- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits' *~ 10
+-- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
+
+--------------------
+-- Traversal Laws --
+--------------------
+
+-----------------------------
+-- Law One: Respect Purity --
+-----------------------------
+
+-- |
+-- When we run a traversal, we expect it to run our handler on the focused elements, then thread the effects through to the outside, but do nothing else!
+-- >>> (traverseOf both pure ("don't", "touch") ∷ [(String, String)]) == (pure ("don't", "touch") ∷ [(String, String)])
+-- True
+
+-- |
+-- >>> (traverseOf both pure ("don't", "touch") ∷ Maybe (String, String)) == (pure ("don't", "touch") ∷ Maybe (String, String))
+-- True
+badTupleSnd ∷ Traversal (Int, a) (Int, b) a b
+badTupleSnd handler (n, a) = (n + 1,) <$> handler a
+
+-- The idea is that traversals shouldn't be messing around where they don't belong. Let the handlers do the updating and don't mess with state yourself!
+
+-- |
+-- >>> traverseOf badTupleSnd pure (10, "Yo")
+-- (11,"Yo")
+
+-- |
+-- >>> pure (10, "Yo")
+-- (10,"Yo")
+
+---------------------------------
+-- Law Two: Consistent Focuses --
+---------------------------------
+
+-- x & myTraversal %~ f
+--   & myTraversal %~ g
+-- ==
+-- x & myTraversal %~ (g . f)
+
+-- In essence this law states that the traversal should never change which elements it focuses due to alterations on those elements.
+-- `both` is a law-abiding traversal, so we expect to see the equality hold for any structure or handlers we can dream up:
+
+-- |
+-- >>> ((0, 0) & both %~ (+10) & both %~ (*10)) == ((0, 0) & both %~ (*10) . (+10))
+-- True
+
+-- |
+-- `filtered` is a law-breaking traversal.
+-- >>> (2 & filtered even %~ (+1) & filtered even %~ (*10)) == (2 & filtered even %~ (*10) . (+1))
+-- False
+
+-- Good Traversal Bad Traversal --
+
+-- Why is there a traversal included in the lens library that blatantly breaks one of the laws?
+-- As it turns out, the traversal laws are more guidelines than anything.
+
+---------------------------
+-- Advanced Manipulation --
+---------------------------
+
+-- partsOf ∷ Traversal' s a → Lens' s [a]
+
+-- The lens generated by partsOf takes all the focuses of the provided traversal and packs them into a
+-- list for you to manipulate however you like. Then, it takes the modified list and maps each element
+-- back into the original structure!!!
+-- We're welcome to use ANY list manipulation functions we want!
+
+-- |
+-- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _1)
+-- "abc"
+
+-- |
+-- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _2)
+-- [1,2,3]
+
+-- |
+-- We can `set` the lens to a list to replace the corresponding elements
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['c', 'a', 't']
+-- [('c',1),('a',2),('t',3)]
+
+-- |
+-- Any 'extra' list elements are simply ignored
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['l', 'e', 'o', 'p', 'a', 'r', 'd']
+-- [('l',1),('e',2),('o',3)]
+
+-- |
+-- Providing too few elements will keep the originals
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['x']
+-- [('x',1),('b',2),('c',3)]
+
+-- |
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) %~ reverse
+-- [('c',1),('b',2),('a',3)]
+
+-- |
+-- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ sort
+-- [('f',1),('o',2),('o',3)]
+
+-- |
+-- See if you can follow along with how this one works:
+-- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ tail
+-- [('o',1),('f',2),('f',3)]
+
+-- |
+-- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . sort . words
+-- ("a a desk how is"," like r","aven writing")
+
+-- ("how is a raven ", "like a ", "writing desk")
+-- 'each' collects each string
+-- "how is a raven " "like a " "writing desk"
+-- 'traversed' focuses each individual character
+-- 'h' 'o' 'w' ' ' 'i' 's' ...
+-- The 'partsOf' around (each . traversed) collects the focuses into a list:
+-- "how is a raven like a writing desk"
+-- 'words' splits the list into words
+-- ["how","is","a","raven","like","a","writing","desk"]
+-- 'sort' sorts the words
+-- ["a","a","desk","how","is","like","raven","writing"]
+-- unwords flattens back to a String (a.k.a. list of characters)
+-- "a a desk how is like raven writing"
+-- 'partsOf' then maps each character back to a position
+-- a a desk how is like r aven writing"
+-- Result:
+-- ("a a desk how is"," like r","aven writing")
+
+-- |
+-- Collect 'each' tuple element into a list, then traverse that list
+-- >>> ("abc", "def") ^.. partsOf each . traversed
+-- ["abc","def"]
+
+-- |
+-- Collect each tuple element, then traverse those strings collecting each character into a list.
+-- >>> ("abc", "def") ^.. partsOf (each . traversed)
+-- ["abcdef"]
+
+-- |
+-- You can use partsOf to edit elements using their neighbours as context.
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _2) %~ \xs → (/ sum xs) <$> xs
+-- [('a',0.16666666666666666),('b',0.3333333333333333),('c',0.5)]
+
+-- [('a', 1), ('b', 2), ('c', 3)]
+-- Focus each number with 'partsOf (traversed . _2)'
+-- [1, 2, 3]
+-- Substitute into the function:
+-- (/ sum [1, 2, 3]) <$> [1, 2, 3]
+-- Evaluate
+-- [0.16666,0.33333,0.5]
+-- partsOf maps back each element into the original structure
+-- 0.16666 0.33333 0.5
+-- Result:
+-- [('a',0.16666), ('b',0.33333), ('c',0.5)]
+
+-------------------------
+-- Polymorphic partsOf --
+-------------------------
+
+-- |
+-- [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False]
+-- unsafePartsOf': not enough elements were supplied
+
+-- |
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False, True]
+-- [(True,1),(False,2),(True,3)]
+
+-- |
+-- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) %~ \xs → zipWith (,) xs ((Just <$> tail xs) ++ [Nothing])
+-- [(('a',Just 'b'),1),(('b',Just 'c'),2),(('c',Nothing),3)]
