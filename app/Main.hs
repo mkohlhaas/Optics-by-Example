@@ -9,7 +9,7 @@ import Data.Bits.Lens (bitAt)
 import qualified Data.ByteString as BS
 import Data.Char
 import Data.Either.Validation
-import Data.List (sort)
+import Data.Foldable (for_)
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
@@ -1211,17 +1211,17 @@ crewNames =
 -- 4
 
 -- |
--- What’s the sum of my focuses?
+-- What's the sum of my focuses?
 -- >>> sumOf folded [1, 2, 3, 4]
 -- 10
 
 -- |
--- What’s the product of my focuses?
+-- What's the product of my focuses?
 -- >>> productOf folded [1, 2, 3, 4]
 -- 24
 
 -- |
--- What’s the first focus?
+-- What's the first focus?
 -- `firstOf`, `preview`, and `^?` are all effectively equivalent; use whichever you like.
 -- >>> firstOf folded []
 -- Nothing
@@ -1239,7 +1239,7 @@ crewNames =
 -- Just 1
 
 -- |
--- What’s the last focus?
+-- What's the last focus?
 -- >>> lastOf folded [1, 2, 3, 4]
 -- Just 4
 
@@ -2322,7 +2322,7 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- [('c',1),('b',2),('a',3)]
 
 -- |
--- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ sort
+-- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ L.sort
 -- [('f',1),('o',2),('o',3)]
 
 -- |
@@ -2331,7 +2331,7 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- [('o',1),('f',2),('f',3)]
 
 -- |
--- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . sort . words
+-- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . L.sort . words
 -- ("a a desk how is"," like r","aven writing")
 
 -- ("how is a raven ", "like a ", "writing desk")
@@ -2635,7 +2635,7 @@ tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
 -- To insert or replace an element we can set a value wrapped in Just; to delete we can set the focus to Nothing.
 -- We can update a value arbitrarily using over and providing a function from `Maybe a → Maybe a`.
 
--- For comparison, here’s ix and at side-by-side:
+-- For comparison, here's ix and at side-by-side:
 -- ix ∷ Index m → Traversal' m (IxValue m)
 -- at ∷ Index m → Lens'      m (Maybe (IxValue m))
 
@@ -2965,8 +2965,8 @@ instance At PostalAddress where
 -- >>> fromMaybe 'z' ("abc" ^? ix 10)
 -- 'z'
 
--- `pre` is a version of `preview` as a higher-order optic. You pass it a fold and it will try to get a value from it, returning `Nothing` if it can’t find one.
--- Note that it returns a Getter, so we can’t set or update using `pre`.
+-- `pre` is a version of `preview` as a higher-order optic. You pass it a fold and it will try to get a value from it, returning `Nothing` if it can't find one.
+-- Note that it returns a Getter, so we can't set or update using `pre`.
 
 -- |
 -- >>> "abc" ^. pre (ix 10) . non 'z'
@@ -2985,3 +2985,635 @@ instance At PostalAddress where
 -- We can combine this with `non` and `ix` to get default values when accessing list elements:
 -- >>> "abc" ^. pre (ix 20) . non 'z'
 -- 'z'
+
+--------------------------------------------------------------------------------------------
+--                                         Prisms                                         --
+--------------------------------------------------------------------------------------------
+
+-------------------------------------------
+-- How do Prisms Fit into the Hierarchy? --
+-------------------------------------------
+
+--            | Get      | Set/Modify | Traverse | Embed
+---------------------------------------------------------
+-- Lens       |  Single  |   Single   | Single   |   ✗
+-- Fold       |   Many   |     ✗      |   ✗      |   ✗
+-- Traversal  |   Many   |   Many     | Many     |   ✗
+-- Prism      | Zero/One |  Zero/One  | Zero/One |  One
+
+-- Prisms can be run backwards, taking a focus and embedding it into a structure!
+-- We'll see how prisms are a natural candidate for specifying pattern-matching semantics and help to work with sum-types as well.
+
+------------------------------------
+-- Simple Pattern-Matching Prisms --
+------------------------------------
+
+-- For the `Either` type we have `_Left` and `_Right` prisms
+
+-- |
+-- >>> Left "message" ^? _Left
+-- Just "message"
+
+-- |
+-- >>> Left "message" ^? _Right
+-- Nothing
+
+-- |
+-- >>> Right 42 ^? _Right
+-- Just 42
+
+-- |
+-- >>> Right 42 ^? _Left
+-- Nothing
+
+-- |
+-- Since prisms are valid traversals we can set, update, or traverse the focused value through them:
+-- >>> Left 10 & _Left +~ 5
+-- Left 15
+
+-- |
+-- >>> Right "howdy" & _Right %~ reverse
+-- Right "ydwoh"
+
+-- |
+-- Same for `Maybe`.
+-- >>> Nothing ^? _Nothing
+-- Just ()
+
+-- |
+-- >>> Nothing ^? _Just
+-- Nothing
+
+-- |
+-- >>> Just "gold" ^? _Just
+-- Just "gold"
+
+-- |
+-- >>> Just "gold" ^? _Nothing
+-- Nothing
+
+-- |
+-- >>> Just 20 & _Just %~ (+10)
+-- Just 30
+
+-----------------------------------------------------------
+-- Checking Pattern Matches with Prisms (`has`, `isn't`) --
+-----------------------------------------------------------
+
+-- |
+-- >>> has _Right (Left "message")
+-- False
+
+-- |
+-- >>> has _Right (Right 37)
+-- True
+
+-- |
+-- >>> isn't _Nothing (Just 12)
+-- True
+
+-- |
+-- >>> isn't _Left (Left ())
+-- False
+
+-----------------------------------------
+-- Generating Prisms with `makePrisms` --
+-----------------------------------------
+
+-- A path is a list of URL segments
+type Path = [String]
+
+type Body = String
+
+data Request
+  = Post Path Body
+  | Get Path
+  | Delete Path
+  deriving (Show)
+
+-- Creates `_Post` `_Get` and `_Delete` prisms.
+makePrisms ''Request
+
+-- This is all we need to use these prisms for getting or setting as if they were traversals:
+
+-- |
+-- >>> Get ["users"] ^? _Get
+-- Just ["users"]
+
+-- |
+-- >>> Get ["users"] ^? _Post
+-- Nothing
+
+-- |
+-- >>> Get ["users"] & _Get .~ ["posts"]
+-- Get ["posts"]
+
+-- |
+-- >>> Post ["users"] "name: John" ^? _Post
+-- Just (["users"],"name: John")
+
+-- |
+-- >>> Post ["users"] "name: John" & _Post . _1 <>~ ["12345"]
+-- Post ["users","12345"] "name: John"
+
+----------------------------------
+-- Embedding Values with Prisms --
+----------------------------------
+
+-- Every prism represents a pattern-match which can be *reversed*.
+-- By feeding a prism a focus we can embed that focus into a structure via the context implied by the pattern.
+-- Even though viewing through a prism may fail if the pattern doesn't match, embedding a value into a pattern using a prism always succeeds!
+-- To run a prism backwards we use the `review` action or its infix version (#); which you can think of as short for "reverse view".
+-- It embeds the focus into the prism's pattern.
+
+-- |
+-- Prisms which match on a constructor of some type can be reversed to embed fields into the constructor.
+-- The reverse of unpacking a specific constructor is to pack those fields into that constructor.
+-- >>> review _Get ["posts"]
+-- Get ["posts"]
+
+-- |
+-- We can use the infix alias to accomplish the same:
+-- >>> _Get # ["posts"]
+-- Get ["posts"]
+
+-- |
+-- >>> _Delete # ["posts"]
+-- Delete ["posts"]
+
+-- |
+-- Constructors with multiple fields accept a tuple of the fields.
+-- >>> _Post # (["posts"], "My blog post")
+-- Post ["posts"] "My blog post"
+
+-- |
+-- Construct a `Left` from a string
+-- >>> review _Left "an error"
+-- Left "an error"
+
+-- |
+-- >>> review _Right 42
+-- Right 42
+
+-- |
+-- composing prisms
+-- >>> _Just . _Left # 1337
+-- Just (Left 1337)
+
+-----------------------------
+-- Other Types of Patterns --
+-----------------------------
+
+-- Although most of the prisms you'll encounter will be used for matching on data type constructors, prisms can also encode more complex and abstract patterns.
+-- Unlike regular pattern matching if a prism fails to match it won't crash, instead the prism simply won't focus anything.
+
+-- |
+-- >>> [1, 2, 3] ^? _Cons
+-- Just (1,[2,3])
+
+-- |
+-- >>> "Freedom!" ^? _Cons
+-- Just ('F',"reedom!")
+
+-- |
+-- >>> "" ^? _Cons
+-- Nothing
+
+-- |
+-- >>> "Freedom!" & _Cons . _2 %~ reverse
+-- "F!modeer"
+
+-- |
+-- `_Cons` is a prism, so we can run it backwards using `review` (a.k.a. `#`), to cons an element onto the front of a list-like type.
+-- This operation will never fail!
+-- >>> _Cons # ('F', "reedom")
+-- "Freedom"
+
+-- |
+-- >>> "Freedom!" & _tail %~ reverse
+-- "F!modeer"
+
+-- |
+-- >>> "Hello" & _head .~ 'J'
+-- "Jello"
+
+-- |
+-- >>> "" & _head .~ 'J'
+-- ""
+
+-- |
+-- >>> isn't _Empty []
+-- False
+
+-- |
+-- >>> isn't _Empty [1, 2, 3]
+-- True
+
+-- |
+-- The phrasing for 'has' isn't quite as clear Feel free to simply define 'is = has' if that helps.
+-- >>> has _Empty M.empty
+-- True
+
+-- |
+-- >>> has _Empty (S.fromList [1, 2, 3])
+-- False
+
+-- The `_Show` prism can Read or Show values to and from their String representations.
+-- The "pattern" we're matching on is whether the value can successfully be parsed into the result type (which will be determined by type inference).
+-- If the string fails to parse into the output type properly the prism will not match.
+-- To run it in reverse it calls "show" on the provided value to turn it back into a string.
+
+-- |
+-- >>> "12" ^? _Show ∷ Maybe Int
+-- Just 12
+
+-- |
+-- The type we assert is important. If we pick a different type it changes the behaviour.
+-- >>> "12" ^? _Show ∷ Maybe Bool
+-- Nothing
+
+-- |
+-- >>> "apple pie" ^? _Show ∷ Maybe Int
+-- Nothing
+
+-- |
+-- Get a list of all Integers in a sentence!
+-- >>> "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Int]
+-- [3,5]
+
+-- |
+-- Make sure you specify the correct output type.
+-- `_Show` uses the output type to decide what to try to read.
+-- Changing the expected type can even change the result!
+-- >>> "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Bool]
+-- [True]
+
+---------------------------
+-- Writing Custom Prisms --
+---------------------------
+
+_Just' ∷ Prism (Maybe a) (Maybe b) a b
+_Just' = prism embed match
+  where
+    embed ∷ b → Maybe b
+    embed b = Just b
+
+    match ∷ Maybe a → Either (Maybe b) a
+    match (Just a) = Right a
+    match Nothing = Left Nothing
+
+-- Since the _Nothing prism doesn’t focus the type variable we know it can’t be a polymorphic prism.
+-- This means we can use the simpler prism' helper in this case.
+_Nothing' ∷ Prism' (Maybe a) ()
+_Nothing' = prism' embed match
+  where
+    embed ∷ () → Maybe a
+    embed () = Nothing
+
+    match ∷ Maybe a → Maybe ()
+    match Nothing = Just ()
+    match (Just _) = Nothing
+
+------------------------------
+-- Matching String Prefixes --
+------------------------------
+
+_Prefix ∷ String → Prism' String String
+_Prefix prefix = prism' embed match
+  where
+    embed ∷ String → String
+    embed s = prefix <> s
+
+    match ∷ String → Maybe String
+    match s = L.stripPrefix prefix s
+
+-- |
+-- >>> "http://phishingscam.com" ^? _Prefix "https://"
+-- Nothing
+
+-- |
+-- >>> "https://totallylegit.com" ^? _Prefix "https://"
+-- Just "totallylegit.com"
+
+-- |
+-- We can even define new prisms using our existing one.
+-- Only add our account number if the connection is secure!
+-- >>> let _Secure = _Prefix "https://"
+-- >>> "https://mybank.com" & _Secure <>~ "?accountNumber=12345"
+-- "https://mybank.com?accountNumber=12345"
+
+-- |
+-- >>> let _Secure = _Prefix "https://"
+-- >>> "http://fakebank.com" & _Secure <>~ "?accountNumber=12345"
+-- "http://fakebank.com"
+
+--------------------------------------------------
+-- Cracking the Coding Interview: Prisms Style! --
+--------------------------------------------------
+
+_Factor ∷ Int → Prism' Int Int
+_Factor n = prism' embed match
+  where
+    embed ∷ Int → Int
+    embed i = i * n
+
+    match ∷ Int → Maybe Int
+    match i
+      | i `mod` n == 0 = Just (i `div` n)
+      | otherwise = Nothing
+
+-- |
+-- Is 3 a factor of 9?
+-- >>> has (_Factor 3) 9
+-- True
+
+-- |
+-- Is 7 NOT a factor of 9?
+-- >>> isn't (_Factor 7) 9
+-- True
+
+-- |
+-- We can factor 5 out of 15 to get 3;
+-- 3 * 5 == 15
+-- >>> 15 ^? _Factor 5
+-- Just 3
+
+-- |
+-- 15 is not evenly divisible by 7
+-- >>> 15 ^? _Factor 7
+-- Nothing
+
+-- Notice how we ‘divide out’ the number when we match. This allows us to properly chain our matches and discover more factors!
+
+-- |
+-- >>> 15 ^? _Factor 3 . _Factor 5
+-- Just 1
+
+-- |
+-- >>> 30 ^? _Factor 5 . _Factor 3
+-- Just 2
+
+-- FizzBuzz with Prisms
+prismFizzBuzz ∷ Int → String
+prismFizzBuzz n
+  | has (_Factor 3 . _Factor 5) n = "FizzBuzz"
+  | has (_Factor 3) n = "Fizz"
+  | has (_Factor 5) n = "Buzz"
+  | otherwise = show n
+
+runFizzBuzz ∷ IO ()
+runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn (prismFizzBuzz n)
+
+-- |
+-- runFizzBuzz
+
+----------
+-- Laws --
+----------
+
+-----------------------------
+-- Law One: Review-Preview --
+-----------------------------
+
+-- preview p (review p value) == Just value
+
+-- |
+-- >>> preview _Left (review _Left "Jabberwocky") == Just "Jabberwocky"
+-- True
+
+-- |
+-- >>> preview _Just (review _Just "Jabberwocky") == Just "Jabberwocky"
+-- True
+
+-------------------------------
+-- Law Two: Prism Complement --
+-------------------------------
+
+-- If we preview with a matching prism to get the focus 'a'
+-- let Just a = preview myPrism s
+
+-- Then we 'review' that focus 'a'
+-- let s' = review myPrism a
+
+-- We must end up back where we started
+-- s == s'
+
+-- |
+-- >>> let s = Right 32
+-- >>> let Just a = preview _Right s
+-- >>> let s' = review _Right a
+-- >>> s == s'
+-- True
+
+-- |
+-- `_Show` is unlawful.
+-- >>> let s = "[1, 2, 3]"
+-- >>> let Just a = preview (_Show ∷ Prism' String [Int]) s
+-- >>> let s' = review _Show a
+-- >>> s == s'
+-- False
+
+-- |
+-- Note the different spacing:
+-- >>> let s = "[1, 2, 3]"
+-- >>> s
+-- "[1, 2, 3]"
+
+-- |
+-- _Show has normalized the value to have no spaces between values
+-- >>> let s = "[1, 2, 3]"
+-- >>> let Just a = preview (_Show ∷ Prism' String [Int]) s
+-- >>> let s' = review _Show a
+-- >>> s'
+-- "[1,2,3]"
+
+---------------------------------------
+-- Law Three: Pass-through Reversion --
+---------------------------------------
+
+-- let Left t = matching l s
+-- let Left s' = matching l t
+-- s == s'
+
+-- |
+-- >>> let s = Nothing ∷ Maybe Int
+-- >>> let Left (t ∷ Maybe String) = matching _Just s
+-- >>> let Left (s' ∷ Maybe Int) = matching _Just t
+-- >>> s == s'
+-- True
+
+-- |
+-- >>> let s = Left "Yo" ∷ Either String Int
+-- >>> let Left (t ∷ Either String Bool) = matching _Right s
+-- >>> let Left (s' ∷ Either String Int) = matching _Right t
+-- >>> s == s'
+-- True
+
+-------------------------------
+-- Case Study: Simple Server --
+-------------------------------
+
+path ∷ Lens' Request Path
+path = lens getter setter
+  where
+    getter (Post p body) = p
+    getter (Get p) = p
+    getter (Delete p) = p
+    setter (Post _ body) p = Post p body
+    setter (Get _) p = Get p
+    setter (Delete _) p = Delete p
+
+-- |
+-- >>> Get ["posts", "12345"] ^. path
+-- ["posts","12345"]
+
+-- |
+-- >>> Post ["posts", "12345"] "My new post" ^. path
+-- ["posts","12345"]
+
+-- |
+-- >>> Get ["posts", "12345"] & path .~ ["hello"]
+-- Get ["hello"]
+
+-- Default server handler:
+serveRequest ∷ Request → String
+serveRequest _ = "404 Not Found"
+
+-- |
+-- >>> serveRequest (Get ["hello"])
+-- "404 Not Found"
+
+-- |
+-- >>> serveRequest (Delete ["user"])
+-- "404 Not Found"
+
+-- |
+-- >>> serveRequest (Post ["hello"] "Is anyone there?")
+-- "404 Not Found"
+
+--------------------------
+-- Path prefix matching --
+--------------------------
+
+_PathPrefix ∷ String → Prism' Request Request
+_PathPrefix prefix = prism' embed match
+  where
+    -- Add the prefix to the path
+    embed ∷ Request → Request
+    embed req = req & path %~ (prefix :)
+
+    -- Check if the prefix matches the path
+    match ∷ Request → Maybe Request
+    match req | has (path . _head . only prefix) req = Just (req & path %~ drop 1)
+    match _ = Nothing
+
+-- |
+-- >>> (Get ["users", "all"]) ^? _PathPrefix "users"
+-- Just (Get ["all"])
+
+-- |
+-- >>> (Delete ["posts", "12345"]) ^? _PathPrefix "posts"
+-- Just (Delete ["12345"])
+
+-- |
+-- Fails to match when prefixes differ
+-- >>> (Get ["other"]) ^? _PathPrefix "users"
+-- Nothing
+
+-- |
+-- Can we run it backwards?
+-- >>> _PathPrefix "users" # Get ["all"]
+-- Get ["users","all"]
+
+-- |
+-- >>> _PathPrefix "posts" # Delete ["12345"]
+-- Delete ["posts","12345"]
+
+-- NOTE!!! We could have implemented _PathPrefix much easier using the existing prefix prism from the lens library, but I wanted to show how it works behind the scenes.
+
+------------------------------------
+-- Altering Sub-Sets of Functions --
+------------------------------------
+
+-- |
+-- >>> tail [1, 2, 3]
+-- [2,3]
+
+-- |
+-- >>> tail []
+-- *** Exception: Prelude.tail: empty list
+
+-- We pass in the original tail function as the value we’re modifying, then we focus the portion of the
+-- function which deals with the empty list by using outside _Empty. We replace that portion of the
+-- function with one that always returns [].
+safeTail ∷ [a] → [a]
+safeTail = tail & outside _Empty .~ const []
+
+-- |
+-- >>> safeTail [1, 2, 3]
+-- [2,3]
+
+-- |
+-- >>> safeTail []
+-- []
+
+-- Handlers
+userHandler ∷ Request → String
+userHandler req = "User handler! Remaining path: " <> L.intercalate "/" (req ^. path)
+
+postsHandler ∷ Request → String
+postsHandler = const "Posts Handler!" & outside (_PathPrefix "index") .~ const "Post Index"
+
+server ∷ Request → String
+server =
+  serveRequest & outside (_PathPrefix "users") .~ userHandler
+    & outside (_PathPrefix "posts") .~ postsHandler
+
+-- |
+-- >>> server (Get ["users", "12345"])
+-- "User handler! Remaining path: 12345"
+
+-- |
+-- >>> server (Delete ["users", "12345", "profile"])
+-- "User handler! Remaining path: 12345/profile"
+
+-- |
+-- It should run the default handler for non user paths.
+-- >>> server (Post ["admin"] "DROP TABLE users")
+-- "404 Not Found"
+
+-- |
+-- >>> server (Get ["posts"])
+-- "Posts Handler!"
+
+-- |
+-- >>> server (Get ["posts", "index"])
+-- "Post Index"
+
+---------------------------
+-- Matching on HTTP Verb --
+---------------------------
+
+postsHandler' ∷ Request → String
+postsHandler' =
+  const "404 Not Found"
+    & outside _Post .~ (\(path', body) → "Created post with body: " <> body)
+    & outside _Get .~ (\path' → "Fetching post at path: " <> L.intercalate "/" path')
+    & outside _Delete .~ (\path' → "Deleting post at path: " <> L.intercalate "/" path')
+
+server' ∷ Request → String
+server' =
+  serveRequest & outside (_PathPrefix "users") .~ userHandler
+    & outside (_PathPrefix "posts") .~ postsHandler'
+
+-- |
+-- >>> server' (Get ["posts", "12345"])
+-- "Fetching post at path: 12345"
+
+-- |
+-- >>> server' (Post ["posts", "12345"] "My new post")
+-- "Created post with body: My new post"
+
+-- |
+-- >>> server' (Delete ["posts", "12345"])
+-- "Deleting post at path: 12345"
