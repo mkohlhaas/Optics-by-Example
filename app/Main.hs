@@ -1,5 +1,3 @@
-{-# LANGUAGE TupleSections #-}
-
 module Main where
 
 import Control.Applicative
@@ -14,10 +12,12 @@ import Data.Either.Validation
 import Data.List (sort)
 import qualified Data.List as L
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import Data.Monoid
 import Data.Ord (comparing)
 import qualified Data.Set as S
 import qualified Data.Text as T
+import Data.Tree
 import Numeric.Lens (negated)
 
 main ∷ IO ()
@@ -2394,3 +2394,594 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- |
 -- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) %~ \xs → zipWith (,) xs ((Just <$> tail xs) ++ [Nothing])
 -- [(('a',Just 'b'),1),(('b',Just 'c'),2),(('c',Nothing),3)]
+
+--------------------------------------------------------------------------------------------
+--                               Indexable Structures                                     --
+--------------------------------------------------------------------------------------------
+
+--------------------------------------
+-- What's an *indexable* structure? --
+--------------------------------------
+
+-- |
+-- Getting values at an index uses !!
+-- >>> let xs = ["Henry I", "Henry II", "Henry III"]
+-- >>> xs !! 0
+-- "Henry I"
+
+-- |
+-- >>> let xs = ["Henry I", "Henry II", "Henry III"]
+-- >>> xs !! 1
+-- "Henry II"
+
+-- |
+-- let xs = ["Henry I", "Henry II", "Henry III"]
+-- xs !! 3
+-- Prelude.!!: index too large
+
+-- |
+-- Maps use `lookup` to 'get' values at an index
+-- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+-- >>> M.lookup "Leo" turtles
+-- Just "Katanas"
+
+-- |
+-- Maps use `adjust` to update the value at an index
+-- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+-- >>> M.adjust ("Two " <>) "Leo" turtles
+-- fromList [("Leo","Two Katanas"),("Raph","Sai")]
+
+-----------------------------------------------
+-- Accessing and Updating Values with 'Ixed' --
+-----------------------------------------------
+
+-- Type families are functions that operate on types!
+
+-- The index for lists is `Int`:
+-- type instance Index [a] = Int
+-- type instance IxValue [a] = a
+
+-- The index for Maps is the key type:
+-- type instance Index (Map k a) = k
+-- type instance IxValue (Map k a) = a
+
+--------------------------------------------
+-- Accessing and Setting Values with `ix` --
+--------------------------------------------
+
+-- |
+-- Get the value at index 1:
+-- >>> let humanoids = ["Borg", "Cardassian", "Talaxian"]
+-- >>> humanoids ^? ix 1
+-- Just "Cardassian"
+
+-- Just "Cardassian"
+
+-- |
+-- There's no value at index 10 so the traversal doesn't focus anything.
+-- >>> let humanoids = ["Borg", "Cardassian", "Talaxian"]
+-- >>> humanoids ^? ix 10
+-- Nothing
+
+-- |
+-- It's a traversal, so we can `set` new values at that index.
+-- >>> let humanoids = ["Borg", "Cardassian", "Talaxian"]
+-- >>> humanoids & ix 1 .~ "Vulcan"
+-- ["Borg","Vulcan","Talaxian"]
+
+-- |
+-- A `set` will do nothing if the given index doesn't have a value.
+-- >>> let humanoids = ["Borg", "Cardassian", "Talaxian"]
+-- >>> humanoids & ix 10 .~ "Romulan"
+-- ["Borg","Cardassian","Talaxian"]
+
+-- |
+-- Get the value at key "Zuko".
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders ^? ix "Zuko"
+-- Just "Fire"
+
+-- |
+-- If there's no value at a key, the traversal returns zero elements.
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders ^? ix "Sokka"
+-- Nothing
+
+-- |
+-- We can set the value at a key, but only if that key already exists.
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders & ix "Toph" .~ "Metal"
+-- fromList [("Katara","Water"),("Toph","Metal"),("Zuko","Fire")]
+
+-- |
+-- Setting a non-existent element of a Map does NOT insert it.
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders & ix "Iroh" .~ "Lightning"
+-- fromList [("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+
+------------------------
+-- Indexed Structures --
+------------------------
+
+-- Structure   | Index  | Value
+-- ------------|--------|-------
+-- [a]         | Int    | a
+-- NonEmpty a  | Int    | a
+-- Seq a       | Int    | a
+-- Vector a    | Int    | a
+-- Set a       | a      | ()
+-- Map k a     | k      | a
+-- Identity a  | ()     | a
+-- Maybe a     | ()     | a
+-- Tree a      | [Int]  | a
+-- Text        | Int    | Char
+-- ByteString  | Int    | Word8
+-- (e → a)     | e      | a
+
+--------------------------------
+-- Indexing Monomorphic Types --
+--------------------------------
+
+-- |
+-- ("hello" ∷ T.Text) ^? ix 0
+-- Just 'h'
+
+-- |
+-- ("hello" ∷ T.Text) ^? ix 10
+-- Nothing
+
+-- |
+-- ("hello" ∷ T.Text) & ix 0 .~ 'j'
+-- "jello"
+
+-- |
+-- Word8's are shown as integers
+-- ("hello" ∷ BS.ByteString) ^? ix 0
+-- Just 104
+
+-- |
+-- ("hello" ∷ BS.ByteString) ^? ix 10
+-- Nothing
+
+-- |
+-- We can edit a Word8 within a ByteString as though it's an integer.
+-- ("hello" ∷ BS.ByteString) & ix 0 +~ 2
+-- "jello"
+
+-- |
+-- Remember, we can always 'traverse' a traversal using effectful handlers!
+-- ("hello" ∷ T.Text) & ix 1 %%~ \_ → ("aeiou" ∷ [Char])
+-- [ "hallo" , "hello" , "hillo" , "hollo" , "hullo" ]
+
+----------------------------------
+-- Indexing Stranger Structures --
+----------------------------------
+
+--     1
+--    / \
+--   2   3
+--  /   / \
+-- 4   5   6
+
+tree ∷ Tree Int
+tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
+
+-- |
+-- The empty list represents the value at the root:
+-- >>> tree ^? ix []
+-- Just 1
+
+-- |
+-- 0 represents the first child of the root.
+-- >>> tree ^? ix [0]
+-- Just 2
+
+-- |
+-- 0, 0 descends into the first child twice then focuses the value at that node.
+-- >>> tree ^? ix [0, 0]
+-- Just 4
+
+-- |
+-- >>> tree ^? ix [1, 0]
+-- Just 5
+
+-- |
+-- >>> tree ^? ix [1, 1]
+-- Just 6
+
+-- |
+-- Invalid paths simply return an empty traversal.
+-- >>> tree ^? ix [5, 6]
+-- Nothing
+
+-- |
+-- Invalid paths simply return an empty traversal.
+-- Indexing into a function runs the function with the index as input
+-- >>> reverse ^? ix "Stella!"
+-- Just "!alletS"
+
+-- |
+-- Invalid paths simply return an empty traversal.
+-- We can set or traverse individual results of a function!
+-- Here we overwrite the function's output at the input value "password" so it instead returns a new value.
+-- >>> let specialReverse = reverse & ix "password" .~ "You found the secret!"
+-- >>> specialReverse "password"
+-- "You found the secret!"
+
+-- |
+-- The function is unaffected at all other inputs
+-- >>> let specialReverse = reverse & ix "password" .~ "You found the secret!"
+-- >>> specialReverse "dunno"
+-- "onnud"
+
+------------------------------------
+-- Inserting & Deleting with `At` --
+------------------------------------
+
+-------------------------
+-- Map-like Structures --
+-------------------------
+
+-- |
+-- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+-- >>> M.insert "Mikey" "Nunchaku" turtles
+-- fromList [("Leo","Katanas"),("Mikey","Nunchaku"),("Raph","Sai")]
+
+-- |
+-- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+-- >>> M.delete "Leo" turtles
+-- fromList [("Raph","Sai")]
+
+-- To insert or replace an element we can set a value wrapped in Just; to delete we can set the focus to Nothing.
+-- We can update a value arbitrarily using over and providing a function from `Maybe a → Maybe a`.
+
+-- For comparison, here’s ix and at side-by-side:
+-- ix ∷ Index m → Traversal' m (IxValue m)
+-- at ∷ Index m → Lens'      m (Maybe (IxValue m))
+
+-- |
+-- Since 'at' creates a lens, we use `^.` instead of `^?`
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders ^. at "Zuko"
+-- Just "Fire"
+
+-- |
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders & at "Zuko" .~ Nothing
+-- fromList [("Katara","Water"),("Toph","Earth")]
+
+-- |
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders & at "Iroh" .~ Just "Lightning"
+-- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+
+-- |
+-- Using the (?~) operator we can avoid writing out the Just when inserting elements.
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> benders & at "Iroh" ?~ "Lightning"
+-- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+
+-- |
+-- We can use this with other optics if we want, but it's usually used with `at`
+-- >>> (1, 2) & both ?~ "twins!"
+-- (Just "twins!",Just "twins!")
+
+-- |
+-- `sans` is just short-hand for setting the value at an index to `Nothing`.
+-- >>> let benders = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+-- >>> sans "Katara" benders
+-- fromList [("Toph","Earth"),("Zuko","Fire")]
+
+-----------------------
+-- Manipulating Sets --
+-----------------------
+
+-- One way to imagine a Set is as a map where the set elements are keys: (Map v ()).
+-- Using unit: () as the value means the only real information stored in the Map is whether a value exists or not
+
+primes ∷ S.Set Int
+primes = S.fromList [2, 3, 5, 7, 11, 13]
+
+-- |
+-- >>> primes ^? ix 5
+-- Just ()
+
+-- |
+-- >>> primes ^? ix 4
+-- Nothing
+
+-- |
+-- >>> primes & at 17 ?~ ()
+-- fromList [2,3,5,7,11,13,17]
+
+-- |
+-- >>> sans 5 primes
+-- fromList [2,3,7,11,13]
+
+-- |
+-- We can use `&` to chain uses of `sans`.
+-- >>> primes & sans 5 & sans 7 & sans 11
+-- fromList [2,3,13]
+
+------------------------------------
+-- Custom Indexed Data Structures --
+------------------------------------
+
+newtype Cycled a = Cycled [a]
+  deriving (Show)
+
+type instance Index (Cycled a) = Int
+
+type instance IxValue (Cycled a) = a
+
+instance Ixed (Cycled a) where
+  ix ∷ Applicative f ⇒ Int → (a → f a) → Cycled a → f (Cycled a)
+  ix i handler (Cycled xs) = Cycled <$> traverseOf (ix (i `mod` length xs)) handler xs
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] ^? ix 1
+-- Just 'b'
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] ^? ix 3
+-- Just 'a'
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] ^? ix 10
+-- Just 'b'
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] ^? ix (-1)
+-- Just 'c'
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] & ix 0 .~ '!'
+-- Cycled "!bc"
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] & ix 10 .~ '!'
+-- Cycled "a!c"
+
+-- |
+-- >>> Cycled ['a', 'b', 'c'] & ix (-1) .~ '!'
+-- Cycled "ab!"
+
+---------------------------------
+-- Custom At: Address Indexing --
+---------------------------------
+
+data PostalAddress = PostalAddress
+  { _buildingNumber ∷ Maybe String,
+    _streetsName ∷ Maybe String,
+    _apartmentNumber ∷ Maybe String,
+    _postalCode ∷ Maybe String
+  }
+  deriving (Show)
+
+makeLenses ''PostalAddress
+
+data AddressPiece
+  = BuildingNumber
+  | StreetName
+  | ApartmentNumber
+  | PostalCode
+  deriving (Show)
+
+type instance Index PostalAddress = AddressPiece
+
+type instance IxValue PostalAddress = String
+
+-- We need the instance declaration for Ixed, but can leave the implementation blank.
+-- It will be implemented automatically in terms of `At`
+instance Ixed PostalAddress
+
+instance At PostalAddress where
+  at ∷ AddressPiece → Lens' PostalAddress (Maybe String)
+  at BuildingNumber = buildingNumber
+  at StreetName = streetsName
+  at ApartmentNumber = apartmentNumber
+  at PostalCode = postalCode
+
+-- |
+-- >>> let addr = PostalAddress Nothing Nothing Nothing Nothing
+-- >>> addr
+-- PostalAddress {_buildingNumber = Nothing, _streetsName = Nothing, _apartmentNumber = Nothing, _postalCode = Nothing}
+
+-- |
+-- >>> let addr = PostalAddress Nothing Nothing Nothing Nothing
+-- >>> let sherlockAddr = addr & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B"
+-- >>> sherlockAddr
+-- PostalAddress {_buildingNumber = Nothing, _streetsName = Just "Baker St.", _apartmentNumber = Just "221B", _postalCode = Nothing}
+
+-- |
+-- >>> let addr = PostalAddress Nothing Nothing Nothing Nothing
+-- >>> let sherlockAddr = addr & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B"
+-- >>> sherlockAddr & ix ApartmentNumber .~ "221A"
+-- PostalAddress {_buildingNumber = Nothing, _streetsName = Just "Baker St.", _apartmentNumber = Just "221A", _postalCode = Nothing}
+
+-- |
+-- >>> let addr = PostalAddress Nothing Nothing Nothing Nothing
+-- >>> let sherlockAddr = addr & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B"
+-- >>> sherlockAddr & sans StreetName
+-- PostalAddress {_buildingNumber = Nothing, _streetsName = Nothing, _apartmentNumber = Just "221B", _postalCode = Nothing}
+
+-----------------------------
+-- Handling Missing Values --
+-----------------------------
+
+--------------------------------------
+-- Checking whether Updates Succeed --
+--------------------------------------
+
+-- |
+-- There's no element at index 6, so the update fails
+-- >>> "abcd" & failover (ix 6) toUpper ∷ Maybe String
+-- Nothing
+
+-- |
+-- There's an element at index 2, so the update succeeds!
+-- >>> "abcd" & failover (ix 2) toUpper ∷ Maybe String
+-- Just "abCd"
+
+-- |
+-- >>> [] & failover _head (*10) ∷ Maybe [Int]
+-- Nothing
+
+-- |
+-- We can nest traversals, the whole chain fails if it focuses no elements
+-- >>> (M.fromList[('a', [1, 2])] & failover (ix 'a' . ix 3) (*10) ∷ Maybe (M.Map Char [Int]))
+-- Nothing
+
+-- |
+-- We can nest traversals, the whole chain fails if it focuses no elements
+-- >>> (M.fromList[('a', [1, 2])] & failover (ix 'a' . ix 1) (*10) ∷ Maybe (M.Map Char [Int]))
+-- Just (fromList [('a',[1,20])])
+
+-- |
+-- It even works with filters
+-- >>> [1, 3, 5] & failover (traversed . filtered even) (*10) ∷ Maybe [Int]
+-- Nothing
+
+-- |
+-- It even works with filters
+-- >>> [1, 3, 5] & failover (traversed . filtered odd) (*10) ∷ Maybe [Int]
+-- Just [10,30,50]
+
+-- |
+-- First update will succeed.
+-- >>> let s = "abcdefg"
+-- >>> failover (ix 8) toUpper s <|> failover (ix 6) toUpper s <|> failover (ix 4) toUpper s
+-- "abcdefG"
+
+------------------------------
+-- Fallbacks with `failing` --
+------------------------------
+
+-- |
+-- Try to get something from index 10, failing that, get something from index 2.
+-- >>> M.fromList [('a', 1), ('b', 2)] ^? (ix 'z' `failing` ix 'b')
+-- Just 2
+
+-- |
+-- It works with updates as well:
+-- >>> M.fromList [('a', 1), ('b', 2)] & (ix 'z' `failing` ix 'b') *~ 10
+-- fromList [('a',1),('b',20)]
+
+-- |
+-- Get the first album available in the map in order of preference.
+-- >>> M.fromList [("Bieber" ∷ String, "Believe"), ("Beyoncé", "Lemonade")] ^? (ix "Swift" `failing` ix "Bieber" `failing` ix "Beyoncé")
+-- Just "Believe"
+
+-- |
+-- The optics we pass to `failing` can be arbitrarily complex so long as the type of the focus is the same for each argument.
+-- >>> M.fromList [('a', (1, [2, 3, 4])), ('b', (5, [6, 7, 8]))] ^.. (ix 'z' . _1 `failing` ix 'a' . _2 . ix 10 `failing` ix 'b' . _2 . traversed)
+-- [6,7,8]
+
+----------------------
+-- Default Elements --
+----------------------
+
+-- This mimics the behaviour of `fromMaybe` using optics.
+
+-- |
+-- >>> Nothing ^. non 0
+-- 0
+
+-- |
+-- >>> Nothing ^. non "default"
+-- "default"
+
+-- |
+-- >>> Just "value" ^. non "default"
+-- "value"
+
+-- |
+-- Using `non` unwraps the `Maybe` so we can view values directly.
+-- "Leslie" has a favourite food, so we can look it up:
+-- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+-- >>> favouriteFoods ^. at "Leslie" . non "Pizza"
+-- "Waffles"
+
+-- |
+-- If we don't know someone's favourite food, the default is "Pizza"
+-- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+-- >>> favouriteFoods ^. at "Leo" . non "Pizza"
+-- "Pizza"
+
+-- |
+-- When setting through `non` it allows us to set values directly without worrying about wrapping them in `Just`.
+-- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+-- >>> favouriteFoods & at "Popeye" . non "Pizza" .~ "Spinach"
+-- fromList [("Garfield","Lasagna"),("Leslie","Waffles"),("Popeye","Spinach")]
+
+-- |
+-- Define an alias for our optic with the default value included.
+-- "Garfield" isn't stored when his favourite matches the default.
+-- >>> let fav name = at name . non "Pizza"
+-- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+-- >>> let newFavourites = favouriteFoods & fav "Garfield" .~ "Pizza"
+-- >>> newFavourites
+-- fromList [("Leslie","Waffles")]
+
+-- |
+-- We still get the correct value when retrieving Garfield's favourite.
+-- >>> let fav name = at name . non "Pizza"
+-- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+-- >>> let newFavourites = favouriteFoods & fav "Garfield" .~ "Pizza"
+-- >>> newFavourites ^. fav "Garfield"
+-- "Pizza"
+
+-- Modifying values.
+
+-- |
+-- Erin will be added to the map since she's missing.
+-- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Erin" . non 0 +~ 10
+-- fromList [("Dwight",39),("Erin",10),("Jim",32)]
+
+-- |
+-- Since Jim already has hours logged we simply increment them.
+-- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Jim" . non 0 +~ 8
+-- fromList [("Dwight",39),("Jim",40)]
+
+-- |
+-- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Dwight" . non 0 .~ 11
+-- fromList [("Dwight",11),("Jim",32)]
+
+-- |
+-- When we pay-out an employee's hours, we set their hours to `0`
+-- `non` removes any keys with the default value from the list entirely.
+-- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Dwight" . non 0 .~ 0
+-- fromList [("Jim",32)]
+
+-----------------------------------
+-- Checking Fold Success/Failure --
+-----------------------------------
+
+-- |
+-- >>> fromMaybe 'z' ("abc" ^? ix 1)
+-- 'b'
+
+-- |
+-- >>> fromMaybe 'z' ("abc" ^? ix 10)
+-- 'z'
+
+-- `pre` is a version of `preview` as a higher-order optic. You pass it a fold and it will try to get a value from it, returning `Nothing` if it can’t find one.
+-- Note that it returns a Getter, so we can’t set or update using `pre`.
+
+-- |
+-- >>> "abc" ^. pre (ix 10) . non 'z'
+-- 'z'
+
+-- |
+-- We use ^. rather than ^? since `pre` turns the fold into a Getter.
+-- >>> [1, 2, 3, 4] ^. pre (traversed . filtered even)
+-- Just 2
+
+-- |
+-- >>> [1, 3] ^. pre (traversed . filtered even)
+-- Nothing
+
+-- |
+-- We can combine this with `non` and `ix` to get default values when accessing list elements:
+-- >>> "abc" ^. pre (ix 20) . non 'z'
+-- 'z'
