@@ -8,6 +8,7 @@ import Control.Monad.State
 import Data.Bits.Lens (bitAt)
 import qualified Data.ByteString as BS
 import Data.Char
+import Data.Coerce (coerce)
 import Data.Either.Validation
 import Data.Foldable (for_)
 import qualified Data.List as L
@@ -18,7 +19,7 @@ import Data.Ord (comparing)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Tree
-import Numeric.Lens (negated)
+import Numeric.Lens (adding, dividing, multiplying, negated)
 
 main ∷ IO ()
 main = putStrLn "Hello Optics by Example!"
@@ -3617,3 +3618,401 @@ server' =
 -- |
 -- >>> server' (Delete ["posts", "12345"])
 -- "Deleting post at path: 12345"
+
+--------------------------------------------------------------------------------------------
+--                                          Isos                                          --
+--------------------------------------------------------------------------------------------
+
+-----------------------------------------
+-- How do Isos Fit into the Hierarchy? --
+-----------------------------------------
+
+--            | Get      | Set/Modify | Traverse | Embed
+---------------------------------------------------------
+-- Lens       |  Single  |   Single   | Single   |   ✗
+-- Fold       |   Many   |     ✗      |   ✗      |   ✗
+-- Traversal  |   Many   |   Many     | Many     |   ✗
+-- Prism      | Zero/One |  Zero/One  | Zero/One |   ✓
+-- Iso        |  Single  |   Single   | Single   |   ✓
+
+-- Because Isos are completely reversible they’re the strongest of all the optics we’ve seen.
+-- By strongest I actually mean most constrained.
+-- Every Iso MUST succeed for all inputs, and MUST be completely reversible.
+-- These strong constraints let us do a lot with them!
+-- Because of their strength, Isos are a valid substitution for any other type of optic we've learned.
+
+-- can be used as | Lens | Fold | Traversal
+-- -------------- | -----| -----| ----------
+-- Lens           |  ✓   |  ✓   |    ✓
+-- Fold           |  ✗   |  ✓   |    ✗
+-- Traversal      |  ✗   |  ✓   |    ✓
+-- Iso            |  ✓   |  ✓   |    ✓
+
+--------------------------
+-- There and Back Again --
+--------------------------
+
+-- uncurry . curry == id
+-- curry . uncurry == id
+
+-- uncurry . curry == curry . uncurry
+
+-- T.pack . T.unpack == id
+-- T.unpack . T.pack == id
+
+-------------------
+-- Building Isos --
+-------------------
+
+-- An iso is an optic which views data after running its transformation on it.
+-- We can view, modify or traverse the data in it's altered form!
+-- If we modify the data in its altered form, the iso will convert the result back through the iso into the original form.
+-- E.g. we can use an iso to edit a String as though it were a Text, and end up with a String again after the modification.
+
+-- We convert the data through the Iso, run the modification, then convert it back.
+
+packed ∷ Iso' String T.Text
+packed = iso to' from'
+  where
+    to' ∷ String → T.Text
+    to' = T.pack
+
+    from' ∷ T.Text → String
+    from' = T.unpack
+
+-- |
+-- Using `packed` views Strings as though they were Text.
+-- >>> "Ay, caramba!" ^. packed
+-- "Ay, caramba!"
+
+-- |
+-- `review`ing an iso runs its inverse
+-- packed # ("Sufferin' Succotash" ∷ T.Text)
+-- "Sufferin' Succotash" ∷ String
+
+-------------------------------
+-- Flipping Isos with `from` --
+-------------------------------
+
+-- |
+-- >>> ("Good grief" ∷ String) ^. packed
+-- "Good grief"
+
+-- |
+-- ("Good grief" ∷ T.Text) ^. from packed
+-- "Good grief" ∷ String
+unpacked ∷ Iso' T.Text String
+unpacked = from packed
+
+-- Note: Both `packed` and `unpacked` are available in Data.Text.Lens from the `lens` library.
+
+------------------------------------
+-- Modification under Isomorphism --
+------------------------------------
+
+-- |
+-- Using the awesome `replace` function from Text.
+-- let str = "Idol on a pedestal" ∷ String
+-- str & packed %~ T.replace "Idol" "Sand"
+-- "Sand on a pedestal"
+
+-- |
+-- Using `over` in place of `%~` also reads nicely.
+-- let str = "Idol on a pedestal" ∷ String
+-- over packed (T.replace "Idol" "Sand") str
+-- "Sand on a pedestal"
+
+-- |
+-- We can of course compose Isos with other optics!
+-- We could just use `T.toUpper` instead, but this demonstrates the point:
+-- let txt = "Lorem ipsum" ∷ T.Text
+-- txt & from packed . traversed %~ toUpper
+-- "LOREM IPSUM"
+
+-------------------------------
+-- Varieties of Isomorphisms --
+-------------------------------
+
+reversed' ∷ Iso' [a] [a]
+reversed' = iso reverse reverse
+
+reversed'' ∷ Iso' [a] [a]
+reversed'' = involuted reverse
+
+-- |
+-- >>> reverse . reverse $ [1, 2, 3]
+-- [1,2,3]
+
+-- |
+-- >>> [1, 2, 3] & reversed'' %~ drop 1
+-- [1,2]
+
+-- |
+-- >>> [1, 2, 3] & reversed'' %~ take 1
+-- [3]
+
+-- |
+-- We gain a lot of power by combining isos with all the other combinators we've learned.
+-- >>> [1, 2, 3, 4] ^.. reversed'' . takingWhile (> 2) traversed
+-- [4,3]
+
+-- |
+-- We can reverse more than once! But you probably shouldn't...
+-- >>> "Blue suede shoes" & reversed'' . taking 1 worded . reversed'' .~ "gloves"
+-- "Blue suede gloves"
+
+-- |
+-- swapped lets us view a tuple as though the slots were swapped around.
+-- >>> ("Fall","Pride") ^. swapped
+-- ("Pride","Fall")
+
+-- |
+-- >>> Right "Field" ^. swapped
+-- Left "Field"
+
+-- |
+-- >>> let (++?) = (++) ^. flipped
+-- >>> "A" ++? "B"
+-- "BA"
+
+-- |
+-- >>> let addTuple = (+) ^. uncurried
+-- >>> addTuple (1, 2)
+-- 3
+
+-- |
+-- >>> 10 ^. negated
+-- -10
+
+-- |
+-- >>> over negated (+10) 30
+-- 20
+
+-- |
+-- >>> 100 ^. adding 50
+-- 150
+
+-- |
+-- Be careful of division by 0 for 'dividing' and 'multiplying'
+-- >>> 100.0 ^. dividing 10
+-- 10.0
+
+--------------------
+-- Composing Isos --
+--------------------
+
+-- Isos compose just like any other optic! They compose both the ‘forwards’ AND ‘reversed’ transformations.
+
+-- |
+-- let txt = "Winter is coming" ∷ T.Text
+-- txt ^. unpacked . reversed
+-- "gnimoc si retniW"
+
+-- |
+-- let txt = "Winter is coming" ∷ T.Text
+-- txt & unpacked . reversed %~ takeWhile (not . isSpace)
+-- "coming"
+
+{- ORMOLU_DISABLE -}
+
+--          INPUT                               OUTPUT
+--          =====                               ======
+--
+-- ("Winter is coming" ∷ Text)             ("coming" ∷ Text)
+--           |                                      |
+-- +---------v------------------------+----------------+-----------------+
+-- |      unpacked                    |        from unpacked             |
+-- +---------+------------------------+-------------^--------------------+
+--           |                                      |
+--    ("Winter is coming" ∷ String)         ("coming" ∷ String)
+--           |                                      |
+-- +---------v------------------------+-------------+--------------------+
+-- |     reversed                     |      from reversed               |
+-- +---------+------------------------+-------------^--------------------+
+--           |                                      |
+--  "gnimoc si retniW"                          "gnimoc"
+--           |                                      |
+--           +-----→ takeWhile (not . isSpace) >----+
+
+{- ORMOLU_ENABLE -}
+
+-- |
+-- >>> 30.0 & dividing 10 . multiplying 2 +~ 1
+-- 35.0
+
+-- The inverse of division is multiplication, and the inverse of multiplication is division.
+
+{- ORMOLU_DISABLE -}
+
+--         INPUT                         OUTPUT
+--         =====                         ======
+--
+--          30.0                          35.0
+--           |                             |
+-- +---------v---------------+----------------+-----------------+
+-- |      dividing 10        |        from (dividing 10)        |
+-- +---------+---------------+-------------^--------------------+
+--           |                             |
+--          3,0                           3,5
+--           |                             |
+-- +---------v---------------+-------------+--------------------+
+-- |     multiplying 2       |      from (multiplying 2)        |
+-- +---------+---------------+-------------^--------------------+
+--           |                             |
+--          6.0                           7.0
+--           |                             |
+--           +-----→       6 + 1      >----+
+
+{- ORMOLU_ENABLE -}
+
+---------------------
+-- Projecting Isos --
+---------------------
+
+-- `mappings` let's us easily transform nested portions of structures in our optics path as we go along!
+
+toYamlList ∷ [String] → String
+toYamlList xs = "- " <> L.intercalate "\n- " xs
+
+-- |
+-- >>> toYamlList ["Milk", "Eggs","Flour"]
+-- "- Milk\n- Eggs\n- Flour"
+
+-- |
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- let strShoppingList = shoppingList ^. mapping unpacked ∷ [String]
+-- toYamlList strShoppingList
+-- "- Milk\n- Eggs\n- Flour"
+
+-- |
+-- Or we can do it all in one go!
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- shoppingList ^. mapping unpacked . to toYamlList
+-- "- Milk\n- Eggs\n- Flour"
+
+-- |
+-- We can even use `traverseOf_`!
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- traverseOf_ (mapping unpacked . to toYamlList) putStrLn $ shoppingList
+-- "- Milk\n- Eggs\n- Flour"
+
+-- We can lift isos through functors? That applies to contravariant functors, bifunctors and even profunctors too!
+-- The functions are called: `contramapping`, `bimapping`, `dimapping`.
+
+-- We can contramap over the input and map over the output all in one go using dimapping!
+-- We take the argument, map and unpack, then run our function. Lastly we pack the functions result.
+textToYamlList ∷ [T.Text] → T.Text
+textToYamlList = toYamlList ^. dimapping (mapping unpacked) packed
+
+-- This is the simple version. :-)
+textToYamlList' ∷ [T.Text] → T.Text
+textToYamlList' = T.pack . toYamlList . fmap T.unpack
+
+-----------------------
+-- Isos and Newtypes --
+-----------------------
+
+------------------------
+-- Coercing with Isos --
+------------------------
+
+-- import Data.Coerce (coerce)
+-- :t coerce
+
+-- coerce ∷ Coercible a b ⇒ a → b
+
+-- Coercible is a special constraint, it’s implemented for us by GHC for any newtype, we can use it even though it won’t show up in instance lists.
+
+newtype Email = Email String
+  deriving (Show)
+
+newtype UserID = UserID String
+  deriving (Show)
+
+-- Each of these types are representationally equal to Strings; the only difference is the type!
+
+-- |
+-- We need to specify which type to coerce into
+-- >>> coerce ("joe@example.com" ∷ String) ∷ Email
+-- Email "joe@example.com"
+
+-- If two types are representationally equal we can even skip the middle-man and go directly between two newtypes:
+-- >>> coerce (Email "joe@example.com") ∷ UserID
+-- UserID "joe@example.com"
+
+-- |
+-- >>> over coerced (reverse ∷ String → String) (Email "joe@example.com") ∷ Email
+-- Email "moc.elpmaxe@eoj"
+
+-- |
+-- Type inference really struggles, and we'll almost always need to add a lot of extra annotations.
+-- >>> Email "joe@example.com" & (coerced ∷ Iso' Email String) . traversed %~ toUpper
+-- Email "JOE@EXAMPLE.COM"
+
+-- using a little helper
+email ∷ Iso' Email String
+email = coerced
+
+-- |
+-- This is much better!
+-- >>> Email "joe@example.com" & email . traversed %~ toUpper
+-- Email "JOE@EXAMPLE.COM"
+newtype Mail = Mail {_mail ∷ String}
+  deriving (Show)
+
+makeLenses ''Mail
+
+-- `makeLenses` will generate a mail iso which behaves just like the one we would have manually defined!
+
+-- |
+-- >>> Mail "joe@example.com" & mail . traversed %~ toUpper
+-- Mail {_mail = "JOE@EXAMPLE.COM"}
+
+--------------------------
+-- Newtype Wrapper Isos --
+--------------------------
+
+-- Alternative is to use `makeWrapped` which creates _Wrapped', _Unwrapped' and _Wrapping'.
+-- makeWrapped ''Mail
+
+----------
+-- Laws --
+----------
+
+-----------------------------------------
+-- The One and Only Law: Reversibility --
+-----------------------------------------
+
+-- myIso . from myIso == id
+-- from myIso . myIso == id
+
+-- `id` is a valid optic which always focuses its whole argument, it’s a valid Iso as well!
+
+-- |
+-- >>> view (reversed . from reversed) ("Testing one two three")
+-- "Testing one two three"
+
+-- |
+-- >>> view (from reversed . reversed) ("Testing one two three")
+-- "Testing one two three"
+
+-- |
+-- >>> view (negated . from negated) 23
+-- 23
+
+-- |
+-- >>> view (from negated . negated) 23
+-- 23
+
+-- Composition of Isos is also an Iso.
+myIso ∷ Iso' Double Double
+myIso = negated . adding 10.0 . multiplying 372.0
+
+-- |
+-- >>> view (myIso . from myIso) 23.0
+-- 23.0
+
+-- |
+-- It's not perfect, but close enough. :-)
+-- >>> view (from myIso . myIso) 23.0
+-- 23.000000000000227
