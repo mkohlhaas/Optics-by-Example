@@ -4,6 +4,7 @@ import Control.Applicative
 import Control.Lens
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
+import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
 import Control.Monad.State
 import Data.Bits.Lens (bitAt)
 import qualified Data.ByteString as BS
@@ -20,9 +21,7 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Tree
 import Numeric.Lens (adding, dividing, multiplying, negated)
-
-main ∷ IO ()
-main = putStrLn "Hello Optics by Example!"
+import Text.Printf
 
 --------------------------------------------------------------------------------------------
 --                                         Optics                                         --
@@ -4310,3 +4309,130 @@ printBoard = itraverseOf_ slotsTraversal printSlot
 
 -- `iplens` is identical to `lens` except the resulting lens will be index-preserving.
 -- iplens ∷ (s → a) → (s → b → t) → IndexPreservingLens s t a b
+
+--------------------------------------------------------------------------------------------
+--                                 Dealing with Type Errors                               --
+--------------------------------------------------------------------------------------------
+
+-- no sample code
+
+--------------------------------------------------------------------------------------------
+--                                    Optics and Monads                                   --
+--------------------------------------------------------------------------------------------
+
+---------------------------
+-- Reader Monad and View --
+---------------------------
+type BenutzerName = String
+
+type Password = String
+
+data Env = Env
+  { _currentUser ∷ BenutzerName,
+    _users ∷ M.Map BenutzerName Password
+  }
+  deriving (Show)
+
+makeLenses ''Env
+
+printUser ∷ ReaderT Env IO ()
+printUser = do
+  user ← asks _currentUser
+  liftIO . putStrLn $ "Current user: " <> user
+
+-- The equivalent lensy version uses `view` like this.
+-- This is actually the exact same view function we're used to using with lenses!
+printUser' ∷ ReaderT Env IO ()
+printUser' = do
+  user ← view currentUser
+  liftIO . putStrLn $ "Current user: " <> user
+
+-- `preview` works the same way!
+getUserPassword ∷ ReaderT Env IO ()
+getUserPassword = do
+  userName ← view currentUser
+  maybePassword ← preview (users . ix userName)
+  liftIO $ print maybePassword
+
+main ∷ IO ()
+main = do
+  runReaderT printUser (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT printUser' (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkin" "hunter2"))
+
+-----------------------------
+-- State Monad Combinators --
+-----------------------------
+
+data Till = Till
+  { _total ∷ Double,
+    _sales ∷ [Double],
+    _taxRate ∷ Double
+  }
+  deriving (Show)
+
+makeLenses ''Till
+
+-- Almost ALL setter combinators have State equivalents which simply replace the `∼` with an `=`!
+
+saleCalculation ∷ StateT Till IO ()
+saleCalculation = do
+  total .= 0
+  total += 8.55 -- Delicious Hazy IPA
+  total += 7.36 -- Red Grapefruit Sour
+  totalSale ← use total -- `use` is like `view`, but for MonadState rather than MonadReader!
+  liftIO $ printf "Total sale: $%.2f\n" totalSale
+  sales <>= [totalSale]
+  total <~ uses taxRate (totalSale *) -- store (<~) it into our total using the total lens
+  taxIncluded ← use total
+  liftIO $ printf "Tax included: $%.2f\n" taxIncluded
+
+-- |
+-- execStateT saleCalculation (Till 0 [] 1.19)
+-- Till {_total = 18.9329, _sales = [15.91], _taxRate = 1.19}
+
+-- All of these MonadState combinators have alternate versions which return the existing or altered versions of the focus, see `(<+=)`, `(<<+=)`, `(<<∼)`, etc...
+
+--------------------
+-- Magnify & Zoom --
+--------------------
+
+data Weather = Weather
+  { _temp ∷ Float,
+    _pressure ∷ Float
+  }
+  deriving (Show)
+
+makeLenses ''Weather
+
+printData ∷ String → ReaderT Float IO ()
+printData statName = do
+  num ← ask
+  liftIO . putStrLn $ statName <> ": " <> show num
+
+weatherStats ∷ ReaderT Weather IO ()
+weatherStats = do
+  magnify temp (printData "temp") -- `magnify` et. al. allow us to ‘re-scope’ a Reader or State monad to a portion of the type focused by a lens.
+  magnify pressure (printData "pressure")
+
+-- |
+-- runReaderT weatherStats (Weather 15 7.2)
+-- temp: 15.0
+-- pressure: 7.2
+
+-- a State action which runs against our Weather object
+convertCelsiusToFahrenheit ∷ StateT Float IO ()
+convertCelsiusToFahrenheit = modify (\celsius → (celsius * (9 / 5)) + 32)
+
+-- In order to run it in a State monad over the Weather type we'll need to zoom-in on the temperature when we run it.
+weatherStats' ∷ StateT Weather IO ()
+weatherStats' = zoom temp convertCelsiusToFahrenheit
+
+-- |
+-- >>> execStateT weatherStats' (Weather 32 12)
+-- Weather {_temp = 89.6, _pressure = 12.0}
+
+-------------------
+-- Classy Lenses --
+-------------------
