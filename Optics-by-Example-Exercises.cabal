@@ -7,7 +7,8 @@ executable Optics-by-Example-Exercises
     hs-source-dirs:     app
     default-language:   Haskell2010
     default-extensions:
-        DeriveFoldable FlexibleContexts FlexibleInstances InstanceSigs
+        DeriveFoldable FlexibleContexts FlexibleInstances
+        FunctionalDependencies InstanceSigs MultiParamTypeClasses
         RankNTypes ScopedTypeVariables TemplateHaskell TupleSections
         TypeApplications TypeFamilies UnicodeSyntax
 

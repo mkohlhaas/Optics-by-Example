@@ -23,7 +23,7 @@ import Data.Tree
 import Numeric.Lens (adding, dividing, multiplying, negated)
 import Text.Printf
 
---------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------
 --                                         Optics                                         --
 --------------------------------------------------------------------------------------------
 
@@ -153,7 +153,7 @@ import Text.Printf
 -- Ship --
 ----------
 data Ship = Ship
-  { _name ∷ String,
+  { _shipName ∷ String,
     _numCrew ∷ Int
   }
   deriving (Show)
@@ -161,7 +161,7 @@ data Ship = Ship
 purplePearl ∷ Ship
 purplePearl =
   Ship
-    { _name = "Purple Pearl",
+    { _shipName = "Purple Pearl",
       _numCrew = 38
     }
 
@@ -175,7 +175,7 @@ makeLenses ''Ship
 
 -- |
 -- >>> purplePearl
--- Ship {_name = "Purple Pearl", _numCrew = 38}
+-- Ship {_shipName = "Purple Pearl", _numCrew = 38}
 
 -------------------------------------------
 -- Getting and Setting with a Field Lens --
@@ -183,11 +183,11 @@ makeLenses ''Ship
 
 -- |
 -- >>> set numCrew 41 purplePearl
--- Ship {_name = "Purple Pearl", _numCrew = 41}
+-- Ship {_shipName = "Purple Pearl", _numCrew = 41}
 
 -- |
--- >>> set name "More Purple Pearl" purplePearl
--- Ship {_name = "More Purple Pearl", _numCrew = 38}
+-- >>> set shipName "More Purple Pearl" purplePearl
+-- Ship {_shipName = "More Purple Pearl", _numCrew = 38}
 
 ----------------------------------
 -- Modifying Fields with a Lens --
@@ -195,11 +195,11 @@ makeLenses ''Ship
 
 -- |
 -- >>> over numCrew (+3) purplePearl
--- Ship {_name = "Purple Pearl", _numCrew = 41}
+-- Ship {_shipName = "Purple Pearl", _numCrew = 41}
 
 -- |
 -- >>> set numCrew (view numCrew purplePearl + 3) purplePearl
--- Ship {_name = "Purple Pearl", _numCrew = 41}
+-- Ship {_shipName = "Purple Pearl", _numCrew = 41}
 
 ---------------
 -- Lens Laws --
@@ -1071,7 +1071,7 @@ newtype Name = Name {getName ∷ String}
   deriving (Show)
 
 data ShipCrew = ShipCrew
-  { _shipName ∷ Name,
+  { _ship ∷ Name,
     _captain ∷ Name,
     _firstMate ∷ Name,
     _conscripts ∷ [Name]
@@ -1089,7 +1089,7 @@ allCrewMembers = folding collectCrewMembers
 myCrew ∷ ShipCrew
 myCrew =
   ShipCrew
-    { _shipName = Name "Purple Pearl",
+    { _ship = Name "Purple Pearl",
       _captain = Name "Grumpy Roger",
       _firstMate = Name "Long-John Bronze",
       _conscripts = [Name "One-eyed Jack", Name "Filthy Frank"]
@@ -4354,12 +4354,7 @@ getUserPassword = do
   maybePassword ← preview (users . ix userName)
   liftIO $ print maybePassword
 
-main ∷ IO ()
-main = do
-  runReaderT printUser (Env "jenkins" (M.singleton "jenkins" "hunter2"))
-  runReaderT printUser' (Env "jenkins" (M.singleton "jenkins" "hunter2"))
-  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkins" "hunter2"))
-  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkin" "hunter2"))
+-- see main function for application!
 
 -----------------------------
 -- State Monad Combinators --
@@ -4436,3 +4431,134 @@ weatherStats' = zoom temp convertCelsiusToFahrenheit
 -------------------
 -- Classy Lenses --
 -------------------
+
+-----------------------------------------------------
+-- What are Classy Lenses and When Do I Need Them? --
+-----------------------------------------------------
+
+-- Classy lenses aren't really a new type of optic so much as a whole DESIGN PATTERN.
+
+--------------------------------
+-- No duplicate record fields --
+--------------------------------
+
+-- A consistent annoyance in Haskell is that you can’t have two records with the same field names.
+-- Classy lenses provide an (imperfect) solution for this.
+
+-- If we have several records which all have a `name` field, we need to disambiguate the fields.
+-- The idiom is to use record name as a field prefix.
+newtype Persona = Persona
+  { _personaName ∷ String
+  }
+  deriving (Show)
+
+newtype Pet = Pet
+  { _petName ∷ String
+  }
+  deriving (Show)
+
+-- Not only is this annoyingly verbose, but there's a greater problem in Haskell as a whole:
+--   we can't write code which is polymorphic over record fields!
+-- If we want to print a record's name, we need a separate method for each record type.
+
+greetPerson ∷ Persona → String
+greetPerson p = "Hello " <> _personaName p <> "!"
+
+greetPet ∷ Pet → String
+greetPet p = "Hello " <> _petName p <> "!"
+
+-- |
+-- >>> greetPerson (Persona "Calvin")
+-- "Hello Calvin!"
+
+-- |
+-- >>> greetPet (Pet "Hobbes")
+-- "Hello Hobbes!"
+
+-- We can use `makeFields` to generate record-polymorphic lenses for all the fields.
+
+makeFields ''Persona
+makeFields ''Pet
+
+-- `makeFields` creates a unified `HasName` class and instances for each of the records too:
+
+-- :browse
+-- class HasName s a | s → a where
+--   name ∷ Lens' s a
+
+-- :info HasName
+-- instance HasName Person String
+-- instance HasName Pet String
+
+-- `HasName` is a FIELD (TYPE) CLASS, a typeclass which provides a lens we can use to get or set the value of that field for any type which implements the typeclass.
+
+-- unify our two greeting functions.
+greetByName ∷ HasName r String ⇒ r → String -- some type `r` has a `name` field of type String
+greetByName r = "Hello " <> r ^. name <> "!"
+
+-- |
+-- >>> greetByName (Persona "Calvin")
+-- "Hello Calvin!"
+
+-- |
+-- >>> greetByName (Pet "Hobbes")
+-- "Hello Hobbes!"
+
+------------------------------------------------------
+-- Separating Logic and Minimizing Global Knowledge --
+------------------------------------------------------
+
+data DataDBEnv = DataDBEnv
+  { _portNumber ∷ Int,
+    _hostName ∷ String,
+    _databaseUrl ∷ String
+  }
+  deriving (Show)
+
+makeLenses ''DataDBEnv
+
+connectDB ∷ (MonadIO m, MonadReader DataDBEnv m) ⇒ m ()
+connectDB = do
+  url ← view databaseUrl
+  liftIO $ putStrLn ("connecting to db at: " <> url)
+
+initialize ∷ (MonadIO m, MonadReader DataDBEnv m) ⇒ m ()
+initialize = do
+  port ← view portNumber
+  host ← view hostName
+  liftIO $ putStrLn ("initializing server at: " <> host <> ":" <> show port)
+
+main ∷ IO ()
+main = do
+  runReaderT printUser (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT printUser' (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkins" "hunter2"))
+  runReaderT getUserPassword (Env "jenkins" (M.singleton "jenkin" "hunter2"))
+  flip runReaderT (DataDBEnv 8000 "example.com" "db.example.com") $ do
+    initialize
+    connectDB
+
+---------------------------------------------
+-- Granular Dependencies with `makeFields` --
+---------------------------------------------
+
+-- In case of a monad stack with a Reader this design pattern will make it much more handy.
+-- See pages 282-284 for the actual code. Very helpful and interesting!
+
+--------------------------------
+-- Field Requirements Compose --
+--------------------------------
+
+-- A benefit of field typeclasses is that they’re specified with constraints, and constraints compose!
+-- This means that if we want to accept a record with multiple specific fields we can do so easily by
+-- just adding multiple Has* constraints.
+
+-- See pages 284-285.
+
+----------------------------------
+-- `makeFields` vs `makeClassy` --
+----------------------------------
+
+-- There are a half-dozen different ways to generate lenses using TemplateHaskell so you'd certainly be forgiven for getting them confused.
+
+-- See pages 285-289 outlines the differences between `makeFields` and `makeClassy`.
