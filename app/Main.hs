@@ -10,7 +10,7 @@ import qualified Data.ByteString as BS
 import Data.Char
 import Data.Coerce (coerce)
 import Data.Either.Validation
-import Data.Foldable (for_)
+import Data.Foldable (for_, toList)
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
@@ -4016,3 +4016,297 @@ myIso = negated . adding 10.0 . multiplying 372.0
 -- It's not perfect, but close enough. :-)
 -- >>> view (from myIso . myIso) 23.0
 -- 23.000000000000227
+
+--------------------------------------------------------------------------------------------
+--                                     Indexed Optics                                     --
+--------------------------------------------------------------------------------------------
+
+------------------------------
+-- What are Indexed Optics? --
+------------------------------
+
+-- The basic idea of indexed optics is that they allow you to accumulate information about your current focus as you dive deeper into an optics path.
+
+-- |
+-- >>> toListOf itraversed ["Summer", "Fall", "Winter", "Spring"]
+-- ["Summer","Fall","Winter","Spring"]
+
+-- |
+-- >>> itoListOf itraversed ["Summer", "Fall", "Winter", "Spring"]
+-- [(0,"Summer"),(1,"Fall"),(2,"Winter"),(3,"Spring")]
+
+-- action     | operator | indexed action | indexed operator
+-- -----------+----------+----------------+------------------
+-- toListOf   |   (^..)  |   itoListOf    |    (^@..)
+-- over       |   (%∼)   |   iover        |    (%@∼)
+-- traverseOf |   (%%∼)  |   itraverseOf  |    (%%@∼)
+-- set        |   (.∼)   |   iset         |    (.@∼)
+-- view       |   (^.)   |   iview        |    (^@.)
+
+-- |
+-- The index type of maps is the key, so we can get a list of all elements and their key:
+-- >>> let agenda = M.fromList [("Monday", "Shopping"), ("Tuesday", "Swimming")]
+-- >>> agenda ^@.. itraversed
+-- [("Monday","Shopping"),("Tuesday","Swimming")]
+
+-- |
+-- The index type of tuples is the first half of the tuple:
+-- >>> (True, "value") ^@.. itraversed
+-- [(True,"value")]
+
+-- |
+-- The index type of trees is a list of int's which indicates their location in the tree.
+-- >>> let t = Node "top" [Node "left" [], Node "right" []]
+-- >>> t ^@.. itraversed
+-- [([],"top"),([0],"left"),([1],"right")]
+
+-- |
+-- By default, the index of a path will be the index of the last optic in the path.
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> agenda ^@.. itraversed . itraversed
+-- [(0,"Shopping"),(1,"Yoga"),(0,"Brunch"),(1,"Food coma")]
+
+-- |
+-- If we end the path with a non-indexed optic (like traverse) we’ll get an error:
+-- When using with indexed actions make sure that your path has the type you expect and ends with an indexed optic!
+-- let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- agenda ^@.. itraversed . traverse
+-- Couldn't match type ‘Indexed i a (Const (Endo [(i, a)]) a)’
+--                with ‘[Char] → Const (Endo [(i, a)]) [Char]’
+-- Expected type: IndexedGetting
+--                  i (Endo [(i, a)]) (Map [Char] [[Char]]) a
+--   Actual type: ([Char] → Const (Endo [(i, a)]) [Char])
+--                → Map [Char] [[Char]]
+--                → Const (Endo [(i, a)]) (Map [Char] [[Char]])
+
+-- index-aware composition operators:
+--   • (<.): Use the index of the optic to the left
+--   • (.>): Use the index of the optic to the right (This is how . already behaves)
+--   • (<.>): Combine the indices of both sides as a tuple
+
+-- |
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> agenda ^@.. itraversed <. itraversed
+-- [("Monday","Shopping"),("Monday","Yoga"),("Saturday","Brunch"),("Saturday","Food coma")]
+
+-- |
+-- We can keep both by using (<.>).
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> agenda ^@.. itraversed <.> itraversed
+-- [(("Monday",0),"Shopping"),(("Monday",1),"Yoga"),(("Saturday",0),"Brunch"),(("Saturday",1),"Food coma")]
+
+-- |
+-- Unlike normal (.), (<.>) is NOT associative, re-associating will change the way the tuples nest.
+-- This is a ridiculous thing to do, but it'll show how the indexes nest,
+-- We'll use an indexed traversal over the characters of each activity name:
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> agenda ^@.. itraversed <.> itraversed <.> itraversed
+-- [(("Monday",(0,0)),'S'),(("Monday",(0,1)),'h'),(("Monday",(0,2)),'o'),(("Monday",(0,3)),'p'),(("Monday",(0,4)),'p'),(("Monday",(0,5)),'i'),(("Monday",(0,6)),'n'),(("Monday",(0,7)),'g'),(("Monday",(1,0)),'Y'),(("Monday",(1,1)),'o'),(("Monday",(1,2)),'g'),(("Monday",(1,3)),'a'),(("Saturday",(0,0)),'B'),(("Saturday",(0,1)),'r'),(("Saturday",(0,2)),'u'),(("Saturday",(0,3)),'n'),(("Saturday",(0,4)),'c'),(("Saturday",(0,5)),'h'),(("Saturday",(1,0)),'F'),(("Saturday",(1,1)),'o'),(("Saturday",(1,2)),'o'),(("Saturday",(1,3)),'d'),(("Saturday",(1,4)),' '),(("Saturday",(1,5)),'c'),(("Saturday",(1,6)),'o'),(("Saturday",(1,7)),'m'),(("Saturday",(1,8)),'a')]
+
+------------------------------
+-- Custom Index Composition --
+------------------------------
+
+-- We could use `icompose` to append the list index to the day of the week as a string:
+showDayAndNumber ∷ String → Int → String
+showDayAndNumber a b = a <> ": " <> show b
+
+-- |
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> agenda ^@.. icompose showDayAndNumber itraversed itraversed
+-- [("Monday: 0","Shopping"),("Monday: 1","Yoga"),("Saturday: 0","Brunch"),("Saturday: 1","Food coma")]
+
+-- Let's define a custom optics composition operator that will automatically append String indices with a comma separator.
+(.++) ∷ (Indexed String s t → r) → (Indexed String a b → s → t) → Indexed String a b → r
+(.++) = icompose (\a b → a ++ ", " ++ b)
+
+populationMap ∷ M.Map String (M.Map String Int)
+populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto", 2930000)]), ("Germany", M.fromList [("Berlin", 3748000), ("Munich", 1456000)])]
+
+-- |
+-- >>> populationMap ^@.. itraversed .++ itraversed
+-- [("Canada, Ottawa",994837),("Canada, Toronto",2930000),("Germany, Berlin",3748000),("Germany, Munich",1456000)]
+
+------------------------
+-- Filtering by Index --
+------------------------
+
+-- |
+-- Get list elements with an 'even' list-index:
+-- >>> ['a'..'z'] ^.. itraversed . indices even
+-- "acegikmoqsuwy"
+
+-- |
+-- >>> let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87) , ("Death of Superman", 92)]
+-- >>> ratings ^.. itraversed . indices (has (prefixed "Dark"))
+-- [94,87]
+
+-- |
+-- `index` works similarly to `indices`, but ignores any focus that doesn't have the exact index you specify.
+-- >>> ['a'..'z'] ^? itraversed . index 10
+-- Just 'k'
+
+-- |
+-- >>> let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87) , ("Death of Superman", 92)]
+-- >>> ratings ^? itraversed . index "Death of Superman"
+-- Just 92
+
+---------------------------
+-- Custom Indexed Optics --
+---------------------------
+
+{- ORMOLU_DISABLE -}
+
+data Board a
+  = Board
+      a a a
+      a a a
+      a a a
+  deriving (Show, Foldable)
+
+data Position = I | II | III
+  deriving (Show, Eq, Ord)
+
+testBoard ∷ Board Char
+testBoard =
+  Board
+    'X' 'O' 'X'
+    '.' 'X' 'O'
+    '.' 'O' 'X'
+
+{- ORMOLU_ENABLE -}
+
+-------------------------
+-- Custom IndexedFolds --
+-------------------------
+
+-- Use a list comprehension to get the list of all coordinate pairs
+-- in the correct order, then zip them with all the slots in our board
+slotsFold ∷ IndexedFold (Position, Position) (Board a) a
+slotsFold = ifolding $ \board → zip [(x, y) | y ← [I, II, III], x ← [I, II, III]] (toList board)
+
+-- |
+-- >>> testBoard ^@.. slotsFold
+-- [((I,I),'X'),((II,I),'O'),((III,I),'X'),((I,II),'.'),((II,II),'X'),((III,II),'O'),((I,III),'.'),((II,III),'O'),((III,III),'X')]
+
+-- |
+-- Filter indices where the Y coord is 'II'
+-- >>> testBoard ^@.. slotsFold . indices ((== II) . snd)
+-- [((I,II),'.'),((II,II),'X'),((III,II),'O')]
+
+------------------------------
+-- Custom IndexedTraversals --
+------------------------------
+
+{- ORMOLU_DISABLE -}
+
+-- I define a polymorphic indexed traversal
+-- with a tuple of positions as the index:
+slotsTraversal ∷ IndexedTraversal (Position, Position) (Board a) (Board b) a b
+slotsTraversal p (Board a1 b1 c1
+                        a2 b2 c2
+                        a3 b3 c3) =
+  Board
+    <$> indexed p (I, I) a1
+    <*> indexed p (II, I) b1
+    <*> indexed p (III, I) c1
+    <*> indexed p (I, II) a2
+    <*> indexed p (II, II) b2
+    <*> indexed p (III, II) c2
+    <*> indexed p (I, III) a3
+    <*> indexed p (II, III) b3
+    <*> indexed p (III, III) c3
+
+{- ORMOLU_ENABLE -}
+
+-- |
+-- Every traversal is also a fold.
+-- >>> testBoard ^@.. slotsTraversal
+-- [((I,I),'X'),((II,I),'O'),((III,I),'X'),((I,II),'.'),((II,II),'X'),((III,II),'O'),((I,III),'.'),((II,III),'O'),((III,III),'X')]
+
+-- |
+-- Setting the whole second row to 'O'.
+-- >>> testBoard & slotsTraversal . indices ((== II) . snd) .~ 'O'
+-- Board 'X' 'O' 'X' 'O' 'O' 'O' '.' 'O' 'X'
+
+-- We pass the coordinates to our printing function so we can easily add newlines in the right spots!
+printBoard ∷ Board Char → IO ()
+printBoard = itraverseOf_ slotsTraversal printSlot
+  where
+    printSlot (III, _) c = putStrLn [c]
+    printSlot (_, _) c = putStr [c]
+
+-- |
+-- printBoard testBoard
+-- XOX
+-- .XO
+-- .OX
+
+-- You can also write an indexed lens using the ilens helper; unlike the others it’s pretty straight-forward:
+--
+-- ilens ∷ (s → (i, a)) → (s → b → t) → IndexedLens i s t a b
+--
+-- You simply provide the index type alongside the focus in your getter and ilens will wire it up correctly!
+
+-------------------
+-- Index Helpers --
+-------------------
+
+-- |
+-- The indexing helper takes a normal optic and simply adds a numeric index alongside its elements.
+-- ("hello" ∷ T.Text) ^@.. indexing each
+-- [(0,'h'),(1,'e'),(2,'l'),(3,'l'),(4,'o')]
+
+-- |
+-- We can re-map or edit the indexes of an optic using reindexed:
+-- >>> ['a'..'c'] ^@.. itraversed
+-- [(0,'a'),(1,'b'),(2,'c')]
+
+-- |
+-- >>> ['a'..'c'] ^@.. reindexed (*10) itraversed
+-- [(0,'a'),(10,'b'),(20,'c')]
+
+-- |
+-- We can even change index types!
+-- >>> ['a'..'c'] ^@.. reindexed show itraversed
+-- [("0",'a'),("1",'b'),("2",'c')]
+
+-- `selfIndex` can be injected into a path to set the index of the path to the current value.
+
+-- |
+-- `selfIndex` copies a snapshot of the current focus into the index
+-- >>> [("Betty", 37), ("Veronica", 12)] ^@.. itraversed . selfIndex <. _2
+-- [(("Betty",37),37),(("Veronica",12),12)]
+
+-----------------------------
+-- Index-Preserving Optics --
+-----------------------------
+
+-- Index preserving optics are just regular optics which pass-through any existing index in the path.
+
+-- |
+-- This one won't compile!
+-- We require an indexed optic since we're using `^@..`, but `_1` 'forgets' the index from `itraversed` without adding any index of its own.
+-- [('a', True), ('b', False), ('c', True)] ^@.. itraversed . _1
+-- Couldn't match type ‘Indexed i a (Const (Endo [(i, a)]) a)’
+--                with ‘Char → Const (Endo [(i, a)]) Char’
+-- Expected type: IndexedGetting i (Endo [(i, a)]) [(Char, Bool)] a
+--   Actual type: (Char → Const (Endo [(i, a)]) Char)
+--                → [(Char, Bool)] → Const (Endo [(i, a)]) [(Char, Bool)]
+
+-- |
+-- However, we can turn `_1` into an index preserving lens!
+-- Now the index 'passes-through' `_1'` to the end.
+-- >>> let _1' = cloneIndexPreservingLens _1
+-- >>> [('a', True), ('b', False), ('c', True)] ^@.. itraversed . _1'
+-- [(0,'a'),(1,'b'),(2,'c')]
+
+-- |
+-- The previous is equivalent to use explicit index passing with `<.`
+-- >>> [('a', True), ('b', False), ('c', True)] ^@.. itraversed <. _1
+-- [(0,'a'),(1,'b'),(2,'c')]
+
+-- cloneIndexPreserving* methods: `cloneIndexPreservingLens`, `cloneIndexPreservingTraversal`, `cloneIndexPreservingSetter`
+
+-- `iplens` is identical to `lens` except the resulting lens will be index-preserving.
+-- iplens ∷ (s → a) → (s → b → t) → IndexPreservingLens s t a b
