@@ -44,8 +44,8 @@ import Text.Printf
 
 -- |
 -- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
--- >>> over (traversed . filtered ((>10) . length)) (\story → take 10 story ++ "...") stories
--- ["This one t...","Nuff!","This is a ..."]
+-- >>> over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
+-- ["This one t ...","Nuff!","This is a  ..."]
 
 ------------------------------------
 -- Impractical Optics at a Glance --
