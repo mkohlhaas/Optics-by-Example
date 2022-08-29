@@ -1,10 +1,10 @@
 module Main where
 
-import Control.Lens
-import Data.Aeson
-import Data.Aeson.Lens
+import Control.Lens (at, filteredBy, ix, makeLensesFor, maximumByOf, only, reindexed, selfIndex, sumOf, view, withIndex, (%~), (&), (*~), (<.), (?~), (^..), (^?), (^@..))
+import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson.Lens (key, members, nth, values, _Array, _Double, _Integer, _JSON, _JSON', _Object, _String)
 import Data.Text (toUpper)
-import GHC.Generics
+import GHC.Generics (Generic)
 import Text.RawString.QQ (r)
 
 main ∷ IO ()

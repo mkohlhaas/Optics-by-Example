@@ -2,5 +2,5 @@
 
 ```shell
 $ cabal repl json-optics --with-ghc=doctest
-$ cabal repl Optics-by-Example-Exercises --with-ghc=doctest
+$ cabal repl optics-by-example-exercises --with-ghc=doctest
 ```

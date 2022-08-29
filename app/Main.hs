@@ -1,29 +1,32 @@
 module Main where
 
-import Control.Applicative
+import Control.Applicative (Applicative (liftA2), (<|>))
 import Control.Lens
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
-import Control.Monad.State
+import Control.Monad.State (MonadIO (..), StateT, execStateT, modify)
 import Data.Bits.Lens (bitAt)
-import qualified Data.ByteString as BS
-import Data.Char
+import Data.ByteString (ByteString)
+import Data.Char (toLower, toUpper)
 import Data.Coerce (coerce)
-import Data.Either.Validation
+import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
-import qualified Data.List as L
+import Data.List (intercalate, sort, stripPrefix)
+import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
-import Data.Monoid
+import Data.Monoid (Sum (Sum))
 import Data.Ord (comparing)
+import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Tree
+import Data.Tree (Tree (Node))
 import Numeric.Lens (adding, dividing, multiplying, negated)
-import Text.Printf
+import Text.Printf (printf)
 
--------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------
 --                                         Optics                                         --
 --------------------------------------------------------------------------------------------
 
@@ -38,7 +41,7 @@ import Text.Printf
 
 -- |
 -- We can perform a task over deeply nested subsets of data.
--- Let's sum all numbers which in a 'Left' within the right half of each tuple
+-- Let's sum all numbers in a `Left` within the right half of each tuple
 -- >>> sumOf (folded . _2 . _Left) [(True, Left 10), (False, Right "pepporoni"), (True, Left 20)]
 -- 30
 
@@ -73,7 +76,7 @@ import Text.Printf
 
 -- |
 -- Sort all the characters in all strings, across word boundaries!
--- >>> ("one", "two", "three") & partsOf (each . traversed) %~ L.sort
+-- >>> ("one", "two", "three") & partsOf (each . traversed) %~ sort
 -- ("eee","hno","orttw")
 
 -- |
@@ -951,7 +954,7 @@ data CrewMember = CrewMember
 
 makeLenses ''CrewMember
 
-roster ∷ S.Set CrewMember
+roster ∷ Set CrewMember
 roster =
   S.fromList
     --              Name                    Role              Talents
@@ -965,7 +968,7 @@ roster =
 -- Collapsing the Set --
 ------------------------
 
-crewMembers ∷ Fold (S.Set CrewMember) CrewMember
+crewMembers ∷ Fold (Set CrewMember) CrewMember
 crewMembers = folded
 
 -- |
@@ -1099,9 +1102,9 @@ myCrew =
 -- >>> myCrew ^.. allCrewMembers
 -- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
 
----------------------------------------------------------------------------------------------------------------------------------------
--- Rule: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! --
----------------------------------------------------------------------------------------------------------------------------------------
+-- =====================================================================================================================================
+-- | RULE: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! |
+-- =====================================================================================================================================
 
 ------------------------
 -- Mapping over Folds --
@@ -1115,7 +1118,6 @@ myCrew =
 
 -- |
 -- We can chain many `to`s in a row
--- >>> import Data.Char (toUpper)
 -- >>> Name "Two-faced Tony" ^. to getName . to (fmap toUpper)
 -- "TWO-FACED TONY"
 
@@ -1786,12 +1788,12 @@ deck =
 -- (10,20,30)
 
 -- |
--- ("Here's Johnny" ∷ T.Text) & each %~ toUpper
+-- ("Here's Johnny" ∷ Text) & each %~ toUpper
 -- "HERE'S JOHNNY"
 
 -- |
 -- you can't change what Text is made of
--- ("Houston we have a problem" ∷ T.Text) & each .~ (22 ∷ Int)
+-- ("Houston we have a problem" ∷ Text) & each .~ (22 ∷ Int)
 -- Couldn't match expected type ‘Text’ with actual type ‘[Char]’
 -- Couldn't match type ‘Int’ with ‘Char’ arising from a use of ‘each’
 
@@ -1849,7 +1851,6 @@ deck =
 -- fromList [("Gohan","710"),("Goku","Over 9000"),("Krillin","5000"),("Piccolo","408")]
 
 -- |
--- >>> import Data.Tree
 -- >>> let opticsTree = Node "Lens" [Node "Fold" [], Node "Traversal" []]
 -- >>> opticsTree & traversed %~ reverse
 -- Node {rootLabel = "sneL", subForest = [Node {rootLabel = "dloF", subForest = []},Node {rootLabel = "lasrevarT", subForest = []}]}
@@ -2322,7 +2323,7 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- [('c',1),('b',2),('a',3)]
 
 -- |
--- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ L.sort
+-- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ sort
 -- [('f',1),('o',2),('o',3)]
 
 -- |
@@ -2331,7 +2332,7 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- [('o',1),('f',2),('f',3)]
 
 -- |
--- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . L.sort . words
+-- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . sort . words
 -- ("a a desk how is"," like r","aven writing")
 
 -- ("how is a raven ", "like a ", "writing desk")
@@ -2523,34 +2524,34 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 --------------------------------
 
 -- |
--- ("hello" ∷ T.Text) ^? ix 0
+-- ("hello" ∷ Text) ^? ix 0
 -- Just 'h'
 
 -- |
--- ("hello" ∷ T.Text) ^? ix 10
+-- ("hello" ∷ Text) ^? ix 10
 -- Nothing
 
 -- |
--- ("hello" ∷ T.Text) & ix 0 .~ 'j'
+-- ("hello" ∷ Text) & ix 0 .~ 'j'
 -- "jello"
 
 -- |
 -- Word8's are shown as integers
--- ("hello" ∷ BS.ByteString) ^? ix 0
+-- ("hello" ∷ ByteString) ^? ix 0
 -- Just 104
 
 -- |
--- ("hello" ∷ BS.ByteString) ^? ix 10
+-- ("hello" ∷ ByteString) ^? ix 10
 -- Nothing
 
 -- |
 -- We can edit a Word8 within a ByteString as though it's an integer.
--- ("hello" ∷ BS.ByteString) & ix 0 +~ 2
+-- ("hello" ∷ ByteString) & ix 0 +~ 2
 -- "jello"
 
 -- |
 -- Remember, we can always 'traverse' a traversal using effectful handlers!
--- ("hello" ∷ T.Text) & ix 1 %%~ \_ → ("aeiou" ∷ [Char])
+-- ("hello" ∷ Text) & ix 1 %%~ \_ → ("aeiou" ∷ [Char])
 -- [ "hallo" , "hello" , "hillo" , "hollo" , "hullo" ]
 
 ----------------------------------
@@ -2679,7 +2680,7 @@ tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
 -- One way to imagine a Set is as a map where the set elements are keys: (Map v ()).
 -- Using unit: () as the value means the only real information stored in the Map is whether a value exists or not
 
-primes ∷ S.Set Int
+primes ∷ Set Int
 primes = S.fromList [2, 3, 5, 7, 11, 13]
 
 -- |
@@ -3285,7 +3286,7 @@ _Prefix prefix = prism' embed match
     embed s = prefix <> s
 
     match ∷ String → Maybe String
-    match s = L.stripPrefix prefix s
+    match s = stripPrefix prefix s
 
 -- |
 -- >>> "http://phishingscam.com" ^? _Prefix "https://"
@@ -3559,7 +3560,7 @@ safeTail = tail & outside _Empty .~ const []
 
 -- Handlers
 userHandler ∷ Request → String
-userHandler req = "User handler! Remaining path: " <> L.intercalate "/" (req ^. path)
+userHandler req = "User handler! Remaining path: " <> intercalate "/" (req ^. path)
 
 postsHandler ∷ Request → String
 postsHandler = const "Posts Handler!" & outside (_PathPrefix "index") .~ const "Post Index"
@@ -3598,8 +3599,8 @@ postsHandler' ∷ Request → String
 postsHandler' =
   const "404 Not Found"
     & outside _Post .~ (\(path', body) → "Created post with body: " <> body)
-    & outside _Get .~ (\path' → "Fetching post at path: " <> L.intercalate "/" path')
-    & outside _Delete .~ (\path' → "Deleting post at path: " <> L.intercalate "/" path')
+    & outside _Get .~ (\path' → "Fetching post at path: " <> intercalate "/" path')
+    & outside _Delete .~ (\path' → "Deleting post at path: " <> intercalate "/" path')
 
 server' ∷ Request → String
 server' =
@@ -3670,13 +3671,13 @@ server' =
 
 -- We convert the data through the Iso, run the modification, then convert it back.
 
-packed ∷ Iso' String T.Text
+packed ∷ Iso' String Text
 packed = iso to' from'
   where
-    to' ∷ String → T.Text
+    to' ∷ String → Text
     to' = T.pack
 
-    from' ∷ T.Text → String
+    from' ∷ Text → String
     from' = T.unpack
 
 -- |
@@ -3686,7 +3687,7 @@ packed = iso to' from'
 
 -- |
 -- `review`ing an iso runs its inverse
--- packed # ("Sufferin' Succotash" ∷ T.Text)
+-- packed # ("Sufferin' Succotash" ∷ Text)
 -- "Sufferin' Succotash" ∷ String
 
 -------------------------------
@@ -3698,9 +3699,9 @@ packed = iso to' from'
 -- "Good grief"
 
 -- |
--- ("Good grief" ∷ T.Text) ^. from packed
+-- ("Good grief" ∷ Text) ^. from packed
 -- "Good grief" ∷ String
-unpacked ∷ Iso' T.Text String
+unpacked ∷ Iso' Text String
 unpacked = from packed
 
 -- Note: Both `packed` and `unpacked` are available in Data.Text.Lens from the `lens` library.
@@ -3724,7 +3725,7 @@ unpacked = from packed
 -- |
 -- We can of course compose Isos with other optics!
 -- We could just use `T.toUpper` instead, but this demonstrates the point:
--- let txt = "Lorem ipsum" ∷ T.Text
+-- let txt = "Lorem ipsum" ∷ Text
 -- txt & from packed . traversed %~ toUpper
 -- "LOREM IPSUM"
 
@@ -3803,12 +3804,12 @@ reversed'' = involuted reverse
 -- Isos compose just like any other optic! They compose both the ‘forwards’ AND ‘reversed’ transformations.
 
 -- |
--- let txt = "Winter is coming" ∷ T.Text
+-- let txt = "Winter is coming" ∷ Text
 -- txt ^. unpacked . reversed
 -- "gnimoc si retniW"
 
 -- |
--- let txt = "Winter is coming" ∷ T.Text
+-- let txt = "Winter is coming" ∷ Text
 -- txt & unpacked . reversed %~ takeWhile (not . isSpace)
 -- "coming"
 
@@ -3871,27 +3872,27 @@ reversed'' = involuted reverse
 -- `mappings` let's us easily transform nested portions of structures in our optics path as we go along!
 
 toYamlList ∷ [String] → String
-toYamlList xs = "- " <> L.intercalate "\n- " xs
+toYamlList xs = "- " <> intercalate "\n- " xs
 
 -- |
 -- >>> toYamlList ["Milk", "Eggs","Flour"]
 -- "- Milk\n- Eggs\n- Flour"
 
 -- |
--- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [Text]
 -- let strShoppingList = shoppingList ^. mapping unpacked ∷ [String]
 -- toYamlList strShoppingList
 -- "- Milk\n- Eggs\n- Flour"
 
 -- |
 -- Or we can do it all in one go!
--- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [Text]
 -- shoppingList ^. mapping unpacked . to toYamlList
 -- "- Milk\n- Eggs\n- Flour"
 
 -- |
 -- We can even use `traverseOf_`!
--- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [T.Text]
+-- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [Text]
 -- traverseOf_ (mapping unpacked . to toYamlList) putStrLn $ shoppingList
 -- "- Milk\n- Eggs\n- Flour"
 
@@ -3900,11 +3901,11 @@ toYamlList xs = "- " <> L.intercalate "\n- " xs
 
 -- We can contramap over the input and map over the output all in one go using dimapping!
 -- We take the argument, map and unpack, then run our function. Lastly we pack the functions result.
-textToYamlList ∷ [T.Text] → T.Text
+textToYamlList ∷ [Text] → Text
 textToYamlList = toYamlList ^. dimapping (mapping unpacked) packed
 
 -- This is the simple version. :-)
-textToYamlList' ∷ [T.Text] → T.Text
+textToYamlList' ∷ [Text] → Text
 textToYamlList' = T.pack . toYamlList . fmap T.unpack
 
 -----------------------
@@ -4119,7 +4120,7 @@ showDayAndNumber a b = a <> ": " <> show b
 (.++) ∷ (Indexed String s t → r) → (Indexed String a b → s → t) → Indexed String a b → r
 (.++) = icompose (\a b → a ++ ", " ++ b)
 
-populationMap ∷ M.Map String (M.Map String Int)
+populationMap ∷ Map String (Map String Int)
 populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto", 2930000)]), ("Germany", M.fromList [("Berlin", 3748000), ("Munich", 1456000)])]
 
 -- |
@@ -4253,7 +4254,7 @@ printBoard = itraverseOf_ slotsTraversal printSlot
 
 -- |
 -- The indexing helper takes a normal optic and simply adds a numeric index alongside its elements.
--- ("hello" ∷ T.Text) ^@.. indexing each
+-- ("hello" ∷ Text) ^@.. indexing each
 -- [(0,'h'),(1,'e'),(2,'l'),(3,'l'),(4,'o')]
 
 -- |
@@ -4329,7 +4330,7 @@ type Password = String
 
 data Env = Env
   { _currentUser ∷ BenutzerName,
-    _users ∷ M.Map BenutzerName Password
+    _users ∷ Map BenutzerName Password
   }
   deriving (Show)
 
