@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Applicative (Applicative (liftA2), (<|>))
+import Control.Arrow ((>>>))
 import Control.Lens
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
@@ -30,24 +31,37 @@ import Text.Printf (printf)
 --                                         Optics                                         --
 --------------------------------------------------------------------------------------------
 
+-- Nearly every data-related programming problem I’ve been faced with in the last year has had an elegant optics-based solution which typically takes less than a single line of code! (1)
+-- `optics` are a family of inter-composable combinators for building bidirectional data transformations. (6)
+-- They [optics] allow us to cleanly separate concerns in stronger ways than either of Object-Oriented or Functional-Programming styles allow on their own. (6)
+-- Optics allow us to specify which portions of data we wish to work with SEPARATELY from the operations we wish to perform on them. (6)
+-- Most tasks can be expressed in a single line of code, and in many cases the resulting code even reads like a simple sentence. (7)
+
 ----------------------------------
 -- Practical Optics at a Glance --
 ----------------------------------
 
 -- |
--- Update portions of immutable data structures
+-- Update portions of immutable data structures.
 -- >>> set _3 False ('a', 'b', 'c')
 -- ('a','b',False)
 
 -- |
 -- We can perform a task over deeply nested subsets of data.
--- Let's sum all numbers in a `Left` within the right half of each tuple
+-- Let's sum all numbers in a `Left` within the right half of each tuple.
 -- >>> sumOf (folded . _2 . _Left) [(True, Left 10), (False, Right "pepporoni"), (True, Left 20)]
 -- 30
 
 -- |
+-- Truncate any stories longer than 10 characters, leaving shorter ones alone.
 -- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
 -- >>> over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
+-- ["This one t ...","Nuff!","This is a  ..."]
+
+-- |
+-- Truncate any stories longer than 10 characters, leaving shorter ones alone.
+-- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
+-- >>> over (traversed . filtered (length >>> (> 10))) (\story → take 10 story ++ " ...") stories
 -- ["This one t ...","Nuff!","This is a  ..."]
 
 ------------------------------------
@@ -60,11 +74,12 @@ import Text.Printf (printf)
 -- 27
 
 -- |
+-- Capitalize each word in a sentence.
 -- >>> "why is a raven like a writing desk" & worded . _head %~ toUpper
 -- "Why Is A Raven Like A Writing Desk"
 
 -- |
--- Multiply every Integer by 100 no matter where they are in the structure:
+-- Multiply every Integer by 100 no matter where they are in the structure.
 -- >>> (Just 3, Left ("hello", [13, 15, 17])) & biplate *~ 100
 -- (Just 300,Left ("hello",[1300,1500,1700]))
 
@@ -88,9 +103,25 @@ import Text.Printf (printf)
 -- prompts = ("What is your name?" , "What is your quest?" , "What is your favourite color?")
 -- prompts & each %%~ (\prompt → putStrLn prompt >> getLine)
 
+-- What is your name?
+-- > Sir Galahad
+-- What is your quest?
+-- > To seek the holy grail
+-- What is your favourite color?
+-- > Blue I think?
+-- ("Sir Galahad","To seek the holy grail","Blue I think?")
+
 --------------------------------------------------------------------------------------------
 --                                         Lenses                                         --
 --------------------------------------------------------------------------------------------
+
+----------------------------
+-- Introduction to Lenses --
+----------------------------
+
+-- Lenses have the following concrete guarantees:
+-- • A Lens focuses (i.e. selects) a SINGLE piece of data within a larger structure.
+-- • A Lens must NEVER FAIL to get or modify that focus.
 
 -------------
 -- Anatomy --
@@ -116,6 +147,50 @@ import Text.Printf (printf)
 -- >>> foldOf (both . each) (["super", "cali"],["fragilistic", "expialidocious"])
 -- "supercalifragilisticexpialidocious"
 
+-------------------------------
+-- Exercises – Optic Anatomy --
+-------------------------------
+
+-- |
+-- >>> view (_1 . _2) ((1, 2), 3)
+-- 2
+
+-- action: view
+-- path: (_1 . _2)
+-- structure: ((1, 2), 3)
+-- focus: 2
+
+-- |
+-- >>> set (_2 . _Left) "new" (False, Left "old")
+-- (False,Left "new")
+
+-- action: set
+-- path: (_2 . _Left)
+-- structure: (False, Left "old")
+-- focus: "old"
+
+-- |
+-- >>> over (taking 2 worded . traversed) toUpper "testing one two three"
+-- "TESTING ONE two three"
+
+-- action: over
+-- path: (taking 2 worded . traversed)
+-- structure: "testing one two three"
+-- focus: "testing one"
+
+-- |
+-- >>> foldOf (both . each) (["super", "cali"],["fragilistic", "expialidocious"])
+-- "supercalifragilisticexpialidocious"
+
+-- action: foldOf
+-- path: (both . each)
+-- structure: (["super", "cali"],["fragilistic", "expialidocious"])
+-- focus: "super", "cali", "fragilistic", "expialidocious"
+
+------------------
+-- Lens Actions --
+------------------
+
 ----------------------------
 -- Viewing through Lenses --
 ----------------------------
@@ -140,21 +215,38 @@ import Text.Printf (printf)
 -- >>> over _1 (*100) (1, 2)
 -- (100,2)
 
--- |
--- >>> view numCrew purplePearl
--- 38
+------------------------------
+-- Exercises - Lens Actions --
+------------------------------
+
+-- 1. Find the structure and the focus in the following lens: Lens' (Bool, (Int, String)) Int
+-- structure: (Bool, (Int, String))
+-- focus: Int
+
+-- 2. Write the type signature of a Lens with the structure (Char, Int) and the focus Char.
+-- Lens' (Char, Int) Char
+
+-- 3. Name 3 actions we can use on a Lens.
+-- view, set, over
+
+-- 4. Which lens could I use to focus the character ‘c’ in the following structure: ('a', 'b', 'c')
+-- _3
+
+-- 5. Write out the (simplified) types of each identifier in the following statement. What is the result of running it?
+-- over ∷ Lens' (Bool, Int) Int → (Int → Int) → (Bool, Int) → (Bool, Int)
 
 -- |
--- >>> _numCrew purplePearl
--- 38
+-- >>> over _2 (* 10) (False, 2)
+-- (False,20)
+
+------------------------
+-- Lenses and Records --
+------------------------
 
 ----------------------------------------
 -- Building a Lens for a Record Field --
 ----------------------------------------
 
-----------
--- Ship --
-----------
 data Ship = Ship
   { _shipName ∷ String,
     _numCrew ∷ Int
@@ -170,19 +262,67 @@ purplePearl =
 
 makeLenses ''Ship
 
+-- `makeLenses` creates the following lenses using `lens`:
+--
+--                               Input structure type
+--                                     |
+--        Getter Fn      Setter Fn     | Input focus type
+--            |              |         |   |
+-- lens ∷ (s → a) → (s → b → t) → Lens s t a b
+--                                       |   |
+--                                       | Output focus type
+--                                       |
+--                                 Output structure type
+--
+-- or the simpler type signature:
+--
+--        Getter Fn   Setter Fn      Structure type
+--            |          |              |
+-- lens ∷ (s → a) → (s → a → s) → Lens' s a
+--                                        |
+--                                    Focus type
+--
 -- numCrew ∷ Lens' Ship Int
 -- numCrew = lens _numCrew (\ship newNumCrew → ship {_numCrew = newNumCrew})
 
--- name ∷ Lens' Ship String
--- name = lens _name (\ship newName → ship {_name = newName})
+-- shipName ∷ Lens' Ship String
+-- shipName = lens _shipName (\ship newShipName → ship {_shipName = newShipName})
+
+----------------------------------
+-- Exercises - Records Part One --
+----------------------------------
+
+-- 1. The structure and focus of a lens are typically represented by which letters in type signatures?
+-- structure: s, t, ...
+-- focus: a, b, ...
+
+-- 2. Which two components are required to create a lens?
+-- Setter and getter function.
+
+-- 3. Implement the following lens: shipName' ∷ Lens' Ship String
+-- See above for a more succinct solution.
+shipName' ∷ Lens' Ship String
+shipName' = lens getShipName setShipName
+  where
+    getShipName = _shipName
+    setShipName ship newShipName = ship {_shipName = newShipName}
+
+-------------------------------------------
+-- Getting and Setting with a Field Lens --
+-------------------------------------------
 
 -- |
 -- >>> purplePearl
 -- Ship {_shipName = "Purple Pearl", _numCrew = 38}
 
--------------------------------------------
--- Getting and Setting with a Field Lens --
--------------------------------------------
+-- |
+-- >>> view numCrew purplePearl
+-- 38
+
+-- |
+-- The same using the field accessor.
+-- >>> _numCrew purplePearl
+-- 38
 
 -- |
 -- >>> set numCrew 41 purplePearl
@@ -201,16 +341,110 @@ makeLenses ''Ship
 -- Ship {_shipName = "Purple Pearl", _numCrew = 41}
 
 -- |
+-- The same using `view` and `set` and running a function over the viewed value.
 -- >>> set numCrew (view numCrew purplePearl + 3) purplePearl
 -- Ship {_shipName = "Purple Pearl", _numCrew = 41}
+
+-------------------------------------------
+-- Automatically Generating Field Lenses --
+-------------------------------------------
+
+-- Automatically generated lenses by e.g. `makeLenses` can be seen in the repl with the browse command!
+
+----------------------------------
+-- Exercises - Records Part Two --
+----------------------------------
+
+-- 1. List the lenses which would be generated by the following `makeLenses` call, including their types.
+--
+-- data Inventory = Inventory
+--   { _wand ∷ Wand,
+--     _book ∷ Book,
+--     _potions ∷ [Potion]
+--   }
+
+-- makeLenses ''Inventory
+
+-- wand ∷ Lens' Inventory Wand
+-- book ∷ Lens' Inventory Book
+-- potions ∷ Lens' Inventory [Potion]
+
+-- 2. Using the heuristics in this chapter, rewrite the following type as a Lens':
+-- gazork ∷ Functor f ⇒ (Spuzz → f Spuzz) → Chumble → f Chumble
+--
+-- Fill in the blanks:
+-- gazork ∷ Lens' _ _
+-- gazork ∷ Lens' Chumble Spuzz
+
+-- 3. The following code won’t compile! Can you see what’s wrong and fix the problem?
+-- data Pet = Pet
+--   { _petName ∷ String,
+--     _petType ∷ String
+--   }
+
+-- getPetName ∷ Pet → String
+-- getPetName pet = view petName pet
+
+-- makeLenses ''Pet
+
+-- The error says:
+-- • Variable not in scope: petName ∷ Lens' Pet String
+
+-- The `makeLenses` call should come right after the data definition of Pet because of TemplateHaskell splicing.
+
+-----------------
+-- Limitations --
+-----------------
+
+-------------------
+-- Is it a Lens? --
+-------------------
+
+-- 1. Is it possible to build a lens which focuses the second element from a three-tuple?
+-- second ∷ Lens' (a, b, c) b
+-- Yes! Use _2.
+
+-- 2. What about a lens which gets or sets the value inside a Maybe?
+-- inMaybe ∷ Lens' (Maybe a) a
+-- No! Maybe could be `Nothing`. No way to return an `a`.
+
+-- 3. How about a lens which focuses on the value inside an Either?
+-- left ∷ Lens' (Either a b) a
+-- No! Basically the same as 2. If Either is a Right you're out of luck.
+
+-- 4. How about this lens which focuses the third element of a list. Is listThird a valid lens?
+-- listThird ∷ Lens' [a] a
+-- No! List does not necessarily have a third element.
+
+-- 5. Can you write a lens which focuses the second element of a tuple if the Bool in the first slot is True and focuses the third element if it's False?
+-- conditional ∷ Lens' (Bool, a, a) a
+-- Yes!
+
+-- 6. Consider the following data type (which would generally be considered bad style):
+-- data Err
+--   = ReallyBadError {_msg ∷ String}
+--   | ExitCode {_code ∷ Int}
+
+-- makeLenses ''Err
+
+-- Can you write a valid lens for?
+-- msg ∷ Lens' Err String
+
+-- No. Err could be ExitCode.
 
 ---------------
 -- Lens Laws --
 ---------------
 
+--------------------
+-- Case Study: _1 --
+--------------------
+
+-- `_1` is a lawful lens.
+
 -- |
 -- 1st lens law:
--- You get back what you set (set-get)
+-- You get back what you set (SET-GET)
 -- >>> let newValue = "Firefly"
 -- >>> view _1 (set _1 newValue ("Star Wars", "Star Trek"))
 -- "Firefly"
@@ -222,19 +456,21 @@ makeLenses ''Ship
 
 -- |
 -- 2nd lens law:
--- Setting back what you got doesn't do anything (get-set)
+-- Setting back what you got doesn't do anything (GET-SET)
+-- No weird side-effects!
 -- >>> let structure = ("Simpsons", "Seinfeld")
 -- >>> set _1 (view _1 structure) structure
 -- ("Simpsons","Seinfeld")
 
 -- |
+-- If we set the focus twice, only the last set should have any visible effect.
 -- >>> let structure = ("Simpsons", "Seinfeld")
 -- >>> set _1 (view _1 structure) structure == structure
 -- True
 
 -- |
 -- 3rd lens law:
--- Setting twice is the same as setting once (set-set)
+-- Setting twice is the same as setting once (SET-SET)
 -- >>> let value1 = "Coffee"
 -- >>> let value2 = "Red Bull"
 -- >>> let structure = ("Beer", "Tea")
@@ -255,9 +491,15 @@ makeLenses ''Ship
 -- >>> set _1 value2 (set _1 value1 structure) == set _1 value2 structure
 -- True
 
+-- You can assume most lenses included with an optics library will be lawful; if they aren't they'll likely
+-- be in a separate `Unsafe` or `Unsound` module or will have documentation detailing how they break the laws.
+
 ---------------------
 -- Case Study: msg --
 ---------------------
+
+-- `msg` is unlawful.
+-- Passes 2nd and 3rd law, but not the 1st.
 
 ---------
 -- Err --
@@ -333,6 +575,12 @@ msg = lens getMsg setMsg
 -- Case Study: lensProduct --
 -----------------------------
 
+-- A very useful law-breaking lens: lensProduct.
+-- lensProduct ∷ Lens' s a → Lens' s b → Lens' s (a, b)
+
+-- It allows you to take two lenses which accept the same structure to simultaneously focus two distinct
+-- parts of it. That sounds reasonable enough, and indeed this situation comes up relatively often.
+
 -------------
 -- Session --
 -------------
@@ -354,12 +602,12 @@ userInfo ∷ Lens' Session (UserId, UserName)
 userInfo = lensProduct userId userName
 
 -- |
--- userId and userName are disjoint:
+-- `userId` and `userName` are disjoint:
 -- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
 -- >>> view userInfo session
 -- ("USER-1234","Joey Tribbiani")
 
--- Using `lensProduct`
+-- Session and `userId` are not disjoint - they overlap!
 alongsideUserId ∷ Lens' Session (Session, UserId)
 alongsideUserId = lensProduct id userId
 
@@ -376,7 +624,7 @@ alongsideUserId = lensProduct id userId
 -- >>> view alongsideUserId (set alongsideUserId (newSession, "USER-9999") session) == (newSession, "USER-9999")
 -- False
 
--- Using `lensProduct`
+-- This time order has changed.
 alongsideSession ∷ Lens' Session (UserId, Session)
 alongsideSession = lensProduct userId id
 
@@ -392,6 +640,27 @@ alongsideSession = lensProduct userId id
 -- >>> let newSession = session {_userId = "USER-5678"}
 -- >>> view alongsideSession (set alongsideSession ("USER-9999", newSession) session) == ("USER-9999", newSession)
 -- False
+
+----------------------
+-- Exercises - Laws --
+----------------------
+
+-- 1. Implement a lens which breaks the second and/or third law. That's get-set and set-set respectively.
+-- 2. Test the get-set and set-set laws for the `msg` lens we wrote this chapter. Does it pass these laws? See above - they pass.
+-- 3. There’s a different way we could have written the `msg` lens such that it would PASS the set-get law and the set-set law, but fail get-set. Implement this other version.
+-- 4. Think up a new lens which is still useful even though it breaks a law or two.
+-- 5. BONUS (this one is tricky): Live a little; write a lens which violates ALL THREE LAWS.
+-- 6. BONUS (another tricky one): Can you write a lawful lens for the following type:
+
+data Builder = Builder
+  { _context ∷ [String],
+    _build ∷ [String] → String
+  }
+
+-- Your lens should be of type:
+-- Lens' Builder String
+
+-- Hint: There's a bit of a trick to get this one to work; the get-set law will be the trickiest, especially since you won't be able to directly compare Builders for equality!
 
 --------------------
 -- Virtual Fields --
@@ -1103,6 +1372,7 @@ myCrew =
 -- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
 
 -- =====================================================================================================================================
+
 -- | RULE: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! |
 -- =====================================================================================================================================
 
