@@ -264,15 +264,15 @@ makeLenses ''Ship
 
 -- `makeLenses` creates the following lenses using `lens`:
 --
---                               Input structure type
+--                               Before structure type
 --                                     |
---        Getter Fn      Setter Fn     | Input focus type
+--        Getter Fn      Setter Fn     | Before focus type
 --            |              |         |   |
 -- lens ∷ (s → a) → (s → b → t) → Lens s t a b
 --                                       |   |
---                                       | Output focus type
+--                                       | After focus type
 --                                       |
---                                 Output structure type
+--                                 After structure type
 --
 -- or the simpler type signature:
 --
@@ -514,8 +514,10 @@ data Err
 msg ∷ Lens' Err String
 msg = lens getMsg setMsg
   where
+    getMsg ∷ Err → String
     getMsg (ReallyBadError message) = message
     getMsg (ExitCode _) = "" -- Hrmm, I guess we just return ""?
+    setMsg ∷ Err → String → Err
     setMsg (ReallyBadError _) newMessage = ReallyBadError newMessage
     setMsg (ExitCode n) newMessage = ExitCode n -- Nowhere to set it, I guess we do nothing?
 
@@ -646,21 +648,36 @@ alongsideSession = lensProduct userId id
 ----------------------
 
 -- 1. Implement a lens which breaks the second and/or third law. That's get-set and set-set respectively.
+
+recorder ∷ Lens' ([a], a) a
+recorder = lens getter setter
+  where
+    getter (_, a) = a
+    setter (history, a) newVal = (a : history, newVal)
+
+-- |
+-- 1st law (set-get).
+-- >>> let tstData = ([5, 4, 3, 2, 1], 5)
+-- >>> let newValue = 6
+-- >>> view recorder (set recorder newValue tstData) == newValue
+-- True
+
+-- |
+-- 2nd law (get-set).
+-- >>> let tstData = ([5, 4, 3, 2, 1], 5)
+-- >>> let newValue = 6
+-- >>> set recorder (view recorder tstData) tstData == tstData
+-- False
+
+-- |
+-- 3rd law (set-set).
+-- >>> let tstData = ([5, 4, 3, 2, 1], 5)
+-- >>> let newValue = 6
+-- >>> let anotherValue = 7
+-- >>> set recorder newValue (set recorder anotherValue tstData) == set recorder newValue tstData
+-- False
+
 -- 2. Test the get-set and set-set laws for the `msg` lens we wrote this chapter. Does it pass these laws? See above - they pass.
--- 3. There’s a different way we could have written the `msg` lens such that it would PASS the set-get law and the set-set law, but fail get-set. Implement this other version.
--- 4. Think up a new lens which is still useful even though it breaks a law or two.
--- 5. BONUS (this one is tricky): Live a little; write a lens which violates ALL THREE LAWS.
--- 6. BONUS (another tricky one): Can you write a lawful lens for the following type:
-
-data Builder = Builder
-  { _context ∷ [String],
-    _build ∷ [String] → String
-  }
-
--- Your lens should be of type:
--- Lens' Builder String
-
--- Hint: There's a bit of a trick to get this one to work; the get-set law will be the trickiest, especially since you won't be able to directly compare Builders for equality!
 
 --------------------
 -- Virtual Fields --
@@ -719,7 +736,8 @@ fahrenheitToCelsius f = (f - 32) * (5 / 9)
 -- >>> over celsius (fahrenheitToCelsius . (+18) . celsiusToFahrenheit) temp
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
--- virtual field
+-- virtual field (using existing lens)
+-- `Temperature` doesn't have a field for Fahrenheit. We fake it by using the `celsius` lens to create a virtual field!
 fahrenheit ∷ Lens' Temperature Float
 fahrenheit = lens getter setter
   where
@@ -741,11 +759,49 @@ fahrenheit = lens getter setter
 -- >>> over fahrenheit (+ 18) temp
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
+--------------------------------
+-- Exercises – Virtual Fields --
+--------------------------------
+
+data User = User
+  { _firstName ∷ String,
+    _lastName ∷ String,
+    _userEmail ∷ String
+  }
+  deriving (Show)
+
+makeLenses ''User
+
+username ∷ Lens' User String
+username = userEmail
+
+fullName' ∷ Lens' User String
+fullName' = lens getter setter
+  where
+    getter user = view firstName user <> (" " ∷ String) <> view lastName user
+    setter user fname = set lastName (lstname fname) (set firstName (fstname fname) user)
+      where
+        fstname = head . words
+        lstname = unwords . tail . words
+
+-- |
+-- >>> let user = User "John" "Cena" "invisible@example.com"
+-- >>> view fullName' user
+-- "John Cena"
+
+-- |
+-- >>> let user = User "John" "Cena" "invisible@example.com"
+-- >>> set fullName' "Doctor of Thuganomics" user
+-- User {_firstName = "Doctor", _lastName = "of Thuganomics", _userEmail = "invisible@example.com"}
+
 ------------------------------------------------
 -- Data Correction and Maintaining Invariants --
 ------------------------------------------------
 
--- including correction logic in lenses
+------------------------------------------
+-- Including Correction Logic in Lenses --
+------------------------------------------
+
 data Time = Time
   { _hours ∷ Int,
     _mins ∷ Int
@@ -768,8 +824,7 @@ mins = lens getter setter
     setter (Time h _) newMinutes = Time h (clamp 0 59 newMinutes)
 
 -- |
--- >>> let time = Time 3 10
--- >>> time
+-- >>> Time 3 10
 -- Time {_hours = 3, _mins = 10}
 
 -- |
@@ -782,9 +837,7 @@ mins = lens getter setter
 -- >>> set mins (-10) time
 -- Time {_hours = 3, _mins = 0}
 
-------------------------
--- alternative lenses --
-------------------------
+-- alternative implementations - unlawful lenses but helpful!
 hours' ∷ Lens' Time Int
 hours' = lens getter setter
   where
@@ -798,8 +851,7 @@ mins' = lens getter setter
     setter (Time h _) newMinutes = Time ((h + (newMinutes `div` 60)) `mod` 24) (newMinutes `mod` 60)
 
 -- |
--- >>> let time = Time 3 10
--- >>> time
+-- >>> Time 3 10
 -- Time {_hours = 3, _mins = 10}
 
 -- |
@@ -813,9 +865,60 @@ mins' = lens getter setter
 -- Time {_hours = 2, _mins = 50}
 
 -- |
--- >>> let time = Time 3 10
 -- >>> over mins' (+1) (Time 23 59)
 -- Time {_hours = 0, _mins = 0}
+
+----------------------------------------
+-- Exercises - Self-Correcting Lenses --
+----------------------------------------
+
+data ProducePrices = ProducePrices
+  { _limePrice ∷ Float,
+    _lemonPrice ∷ Float
+  }
+  deriving (Show)
+
+limePrice ∷ Lens' ProducePrices Float
+limePrice = lens getter setter
+  where
+    getter = _limePrice
+    setter pp newPrice | newPrice < 0, _lemonPrice pp < 0.5 = pp {_limePrice = 0}
+    setter pp newPrice | newPrice < 0 = pp {_limePrice = 0, _lemonPrice = 0.5}
+    setter pp newPrice | abs (newPrice - _lemonPrice pp) < 0.5 = pp {_limePrice = newPrice}
+    setter pp newPrice | newPrice - _lemonPrice pp > 0.5 = pp {_limePrice = newPrice, _lemonPrice = newPrice - 0.5}
+    setter pp newPrice | _lemonPrice pp - newPrice > 0.5 = pp {_limePrice = newPrice, _lemonPrice = newPrice + 0.5}
+    setter pp newPrice = pp {_limePrice = newPrice}
+
+lemonPrice ∷ Lens' ProducePrices Float
+lemonPrice = lens getter setter
+  where
+    getter = _lemonPrice
+    setter pp newPrice | newPrice < 0, _limePrice pp < 0.5 = pp {_lemonPrice = 0}
+    setter pp newPrice | newPrice < 0 = pp {_lemonPrice = 0, _limePrice = 0.5}
+    setter pp newPrice | abs (newPrice - _limePrice pp) < 0.5 = pp {_lemonPrice = newPrice}
+    setter pp newPrice | newPrice - _limePrice pp > 0.5 = pp {_lemonPrice = newPrice, _limePrice = newPrice - 0.5}
+    setter pp newPrice | _limePrice pp - newPrice > 0.5 = pp {_lemonPrice = newPrice, _limePrice = newPrice + 0.5}
+    setter pp newPrice = pp {_lemonPrice = newPrice}
+
+-- |
+-- >>> let prices = ProducePrices 1.50 1.48
+-- >>> set limePrice 2 prices
+-- ProducePrices {_limePrice = 2.0, _lemonPrice = 1.5}
+
+-- |
+-- >>> let prices = ProducePrices 1.50 1.48
+-- >>> set limePrice 1.8 prices
+-- ProducePrices {_limePrice = 1.8, _lemonPrice = 1.48}
+
+-- |
+-- >>> let prices = ProducePrices 1.50 1.48
+-- >>> set limePrice 1.63 prices
+-- ProducePrices {_limePrice = 1.63, _lemonPrice = 1.48}
+
+-- |
+-- >>> let prices = ProducePrices 1.50 1.48
+-- >>> set limePrice (-1.00) prices
+-- ProducePrices {_limePrice = 0.0, _lemonPrice = 0.5}
 
 --------------------------------------------------------------------------------------------
 --                                 Polymorphic Optics                                     --
