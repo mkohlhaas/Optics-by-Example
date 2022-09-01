@@ -1,3 +1,5 @@
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Main where
 
 import Control.Applicative (Applicative (liftA2), (<|>))
@@ -924,10 +926,37 @@ lemonPrice = lens getter setter
 --                                 Polymorphic Optics                                     --
 --------------------------------------------------------------------------------------------
 
+----------------------------------------
+-- Introduction to Polymorphic Optics --
+----------------------------------------
+
+----------------------------------
+-- Simple vs Polymorphic Optics --
+----------------------------------
+
+-- polymorphic lens
+-- Lens s t a b
+
+-- When we run an action (like over) on our lens we dive deep into the structure <s> to find the focus
+-- <a>, then pass that to the action. The action has the option of modifying the focus to return a <b>,
+-- then the lens glues everything back together and construct a <t>.
+
+-- We need polymorphic lenses whenever an action might want to change the type of the focus!
+
+-----------------------------------------
+-- When do We Need Polymorphic Lenses? --
+-----------------------------------------
+
+---------------------------
+-- Type-Changing Focuses --
+---------------------------
+
 -----------------------------------------------------
 -- Changing type variables with polymorphic lenses --
 -----------------------------------------------------
 
+-- We can use polymorphic lenses to change the type of specific slots of a tuple's type,
+-- but this principle generalizes to type variables in other data types as well.
 data Promotion a = Promotion
   { _item ∷ a,
     _discountPercentage ∷ Double
@@ -939,30 +968,27 @@ item = lens getter setter
   where
     getter ∷ Promotion a → a
     getter = _item
-
     setter ∷ Promotion a → b → Promotion b
     setter promo newItem = promo {_item = newItem}
 
 -- |
--- >>> let peachPromo = Promotion "A really delicious Peach" 25.0
--- >>> peachPromo
+-- >>> Promotion "A really delicious Peach" 25.0
 -- Promotion {_item = "A really delicious Peach", _discountPercentage = 25.0}
 
 -- |
 -- let peachPromo = Promotion "A really delicious Peach" 25.0
 -- :t peachPromo
--- peachPromo ∷ Promotion [Char]
+-- peachPromo ∷ Promotion String
 
 -- |
 -- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
 -- :t buffyFigurines
--- buffyFigurines ∷ [[Char]]
+-- buffyFigurines ∷ [String]
 
 -- |
 -- >>> let peachPromo = Promotion "A really delicious Peach" 25.0
 -- >>> let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
--- >>> let buffyPromo = set item buffyFigurines peachPromo
--- >>> buffyPromo
+-- >>> set item buffyFigurines peachPromo
 -- Promotion {_item = ["Buffy","Angel","Willow","Giles"], _discountPercentage = 25.0}
 
 -- |
@@ -970,24 +996,110 @@ item = lens getter setter
 -- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
 -- let buffyPromo = set item buffyFigurines peachPromo
 -- :t buffyPromo
--- buffyPromo ∷ Promotion [[Char]]
+-- buffyPromo ∷ Promotion [String]
 
------------------
--- Preferences --
------------------
+-- Can we write polymorphic Lenses for `best` and `worst`?
+-- No. A Lens focuses always on one thing only.
+-- You would need a Traversal.
 data Preferences a = Preferences
   { _best ∷ a,
     _worst ∷ a
   }
   deriving (Show)
 
+------------------------------------
+-- Exercises – Polymorphic Lenses --
+------------------------------------
+
+-- 1. Write the type signature of the polymorphic lens which would allow changing a Vorpal x to a Vorpal y.
+-- Lens (Vorpal x) (Vorpal y) x y
+
+-- 2. Find one possible way to write a polymorphic lens which changes the type of the `best` and
+--   `worst` fields in the `Preferences` type above. You're allowed to change the type of the lenses or
+--    alter the type itself.
+
+-- By pairing up both values in the focus we can pass BOTH values packed up into a tuple. We're still only
+-- selecting one focus with the lens, but we’re being sneaky and filling that focus with TWO values. This
+-- isn't terribly helpful in this case, but there are times when you may need to use this sort of roundabout method.
+favourites ∷ Lens (Preferences a) (Preferences b) (a, a) (b, b)
+favourites = lens getter setter
+  where
+    getter pref = (_best pref, _worst pref)
+    setter pref (newBest, newWorst) = pref {_best = newBest, _worst = newWorst}
+
+data Preferences' a b = Preferences'
+  { _best' ∷ a,
+    _worst' ∷ b
+  }
+  deriving (Show)
+
+best' ∷ Lens (Preferences' a c) (Preferences' b c) a b
+best' = lens getter setter
+  where
+    getter = _best'
+    setter pref newVal = pref {_best' = newVal}
+
+worst' ∷ Lens (Preferences' c a) (Preferences' c b) a b
+worst' = lens getter setter
+  where
+    getter = _worst'
+    setter pref newVal = pref {_worst' = newVal}
+
+-- 3. We can change type of more complex types too. What is the type of a lens which could change the type variable here?
+data Result e = Result {_lineNumber ∷ Int, _result ∷ Either e String}
+
+-- Because the `e` is inside an Either type we can't focus it with a lens directly, we're not always
+-- guaranteed to have an e available. We'll have to focus the entire Either and let the user decide
+-- what to do if it's missing:
+result ∷ Lens (Result e) (Result f) (Either e String) (Either f String)
+result = lens getter setter
+  where
+    getter res@Result {_result} = _result
+    setter res newEither = res {_result = newEither}
+
+-- 4. It's thinking time! Is it possible to change more than one type variable at a time using a polymorphic lens?
+-- Yes!
+
+data ParseResult e a
+  = Error e
+  | ParseResult a
+  deriving (Show)
+
+--                   input getter
+--                        |            output setter
+--                        |                 |         output getter
+--                        |                 |              |        input setter
+--                        |                 |              |            |
+parseResult ∷ Lens (ParseResult e a) (ParseResult f b) (Either e a) (Either f b)
+parseResult = lens getter setter
+  where
+    getter (Error e) = Left e
+    getter (ParseResult a) = Right a
+    setter _ (Left e) = Error e
+    setter _ (Right a) = ParseResult a
+
+-- 5. BONUS Come up with some sort of lens to change from a Predicate a to a Predicate b
+
+newtype Predicate a = Predicate (a → Bool)
+
+-- This is another one of those cases where we can't focus the type variable directly, we'll need to pass
+-- the full structure to the user and let them handle it:
+
+pred ∷ Lens (Predicate a) (Predicate b) (a → Bool) (b → Bool)
+pred = lens getter setter
+  where
+    getter (Predicate f) = f
+    setter _ newFn = Predicate newFn
+
 ----------------------
 -- Composing Lenses --
 ----------------------
 
-------------------
--- Nested Types --
-------------------
+------------------------------------------------------
+-- How do I Update Fields in Deeply Nested Records? --
+------------------------------------------------------
+
+-- Deeply Nested Types
 data Person = Person
   { _fullName ∷ String,
     _address ∷ Address
@@ -1027,7 +1139,8 @@ sherlock =
           }
     }
 
--- using standard record update syntax to change street number
+-- Using standard record update syntax to change street number. Very messy.
+-- In most imperative languages this would be simply `sherlock.address.streetAddress.streetNumber = "221A"`!
 setStreetNumber ∷ String → Person → Person
 setStreetNumber newStreetAddress person =
   let existingAddress = _address person
@@ -1043,6 +1156,7 @@ setStreetNumber newStreetAddress person =
         }
 
 -- |
+-- Does it even work? Yes - at least something.
 -- >>> setStreetNumber "221A" sherlock
 -- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
 
@@ -1064,27 +1178,49 @@ updateStreetAddress modify existingAddress = existingAddress {_streetAddress = m
 updateStreetNumber ∷ (String → String) → (StreetAddress → StreetAddress)
 updateStreetNumber modify existingStreetAddress = existingStreetAddress {_streetNumber = modify . _streetNumber $ existingStreetAddress}
 
-----------------------
--- Composing Lenses --
-----------------------
-
 -- Terminology:
 -- modifier ∷ (a → a)
 -- updater ∷ (a → a) → (s → s)
 -- e.g. updateAddress = updater, (Address → Address) = modifier
+-- An updater receives and returns a modifier.
+-- A modifier receives and returns the same type.
 
 -- |
--- Composing two updateres creates a new updater:
+-- Composing two updaters creates a new updater:
 -- :t (updateStreetAddress . updateStreetNumber)
--- (updateStreetAddress . updateStreetNumber) ∷ (String → String) → Address → Address
+-- (updateStreetAddress . updateStreetNumber) ∷ (String → String) → (Address → Address)
 
 -- |
+-- Composing three updaters.
 -- :t (updateAddress . updateStreetAddress . updateStreetNumber)
--- (updateAddress . updateStreetAddress . updateStreetNumber) ∷ (String → String) → Person → Person
+-- (updateAddress . updateStreetAddress . updateStreetNumber) ∷ (String → String) → (Person → Person)
 
 -- |
 -- >>> (updateAddress . updateStreetAddress . updateStreetNumber) (const "221A") sherlock
 -- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
+
+----------------------
+-- Composing Lenses --
+----------------------
+
+-- Updaters and the way we composed them together represent the essence of optics!
+-- Composition is at the core of how optics work!
+-- Just as composing updaters makes another updater, composing lenses makes a new lens!
+-- "Lens composition" is actually just "function composition".
+
+-- Comparing updaters and lenses:
+--
+-- updaters ∷             (String →   String) → Person →   Person
+-- lenses   ∷ Functor f ⇒ (String → f String) → Person → f Person
+-- Here's the simplified type alias signature of `lenses`:
+--
+-- The Functor is the magic that lets us run all sorts of interesting actions besides just updates.
+--
+-- lenses ∷ Lens' Person String
+
+--------------------------------
+-- How do Lens Types Compose? --
+--------------------------------
 
 -- |
 -- address ∷ Lens' Person Address
@@ -1107,15 +1243,7 @@ updateStreetNumber modify existingStreetAddress = existingStreetAddress {_street
 -- :t address . streetAddress . streetNumber
 -- address . streetAddress . streetNumber ∷ Functor f ⇒ (String → f String) → Person → f Person
 
---------------------------------
--- How do Lens Types Compose? --
---------------------------------
-
-----------
--- Game --
-----------
-
--- Some dead-simple types which represent our game
+-- Composition of Polymorphic Lenses
 data Player = Player deriving (Show)
 
 data Wool = Wool deriving (Show)
@@ -1143,6 +1271,64 @@ gameState = (Player, Item Wool 5)
 -- |
 -- >>> over (_2 . material) weave gameState
 -- (Player,Item {_material = Sweater, _amount = 5})
+
+-- The path specialized to our specific types.
+-- (_2 . material) ∷ Lens (Player, Item Wool) (Player, Item Sweater) Wool Sweater
+
+-- Optics compose easily without much boiler-plate, so we should prefer many small precise optics rather than large bulky ones!
+
+----------------------------------
+-- Exercises – Lens Composition --
+----------------------------------
+
+-- 1. Fill in the blank with the appropriate composition of tuple lenses in the following statement:
+
+-- >>> view ??? ("Ginerva", (("Galileo", "Waldo"), "Malfoy"))
+-- "Waldo"
+
+-- |
+-- >>> view (_2 . _1 . _2) ("Ginerva", (("Galileo", "Waldo"), "Malfoy"))
+-- "Waldo"
+
+-- 2. Given the following lens types, fill in the missing type of `mysteryDomino`.
+
+-- fiveEightDomino ∷ Lens' Five Eight
+-- mysteryDomino ∷ Lens' ??? ???
+-- twoThreeDomino ∷ Lens' Two Three
+
+-- dominoTrain ∷ Lens' Five Three
+-- dominoTrain = fiveEightDomino . mysteryDomino . twoThreeDomino
+
+-- mysteryDomino ∷ Lens' Eight Two
+
+-- 3. Using what you know about how lenses work under the hood; rewrite the following signature
+-- as a polymorphic lens of the form: Lens s t a b. Then identify each animal as one of: pre-action
+-- structure, post-action structure, pre-action focus, post-action focus.
+
+-- Functor f ⇒ (Armadillo → f Hedgehog) → (Platypus → f BabySloth)
+
+-- Lens Platypus BabySloth Armadillo Hedgehog
+
+-- 4. Find a way to compose ALL of the following lensees together into one big path using each exactly once. What's the type of the resulting lens?
+
+-- spuzorktrowmble   ∷ Lens Chumble      Spuzz      Gazork       Trowlg
+-- gazorlglesnatchka ∷ Lens Gazork       Trowlg     Bandersnatch Yakka
+-- zinkattumblezz    ∷ Lens Zink         Wattoom    Chumble      Spuzz
+-- gruggazinkoom     ∷ Lens Grug         Pubbawup   Zink         Wattoom
+-- banderyakoobog    ∷ Lens Bandersnatch Yakka      Foob         Mog
+-- boowockugwup      ∷ Lens Boojum       Jabberwock Grug         Pubbawup
+-- snajubjumwock     ∷ Lens Snark        JubJub     Boojum       Jabberwock
+
+-- snajubjumwock     ∷ Lens Snark        JubJub     Boojum       Jabberwock
+-- boowockugwup      ∷ Lens Boojum       Jabberwock Grug         Pubbawup
+-- gruggazinkoom     ∷ Lens Grug         Pubbawup   Zink         Wattoom
+-- zinkattumblezz    ∷ Lens Zink         Wattoom    Chumble      Spuzz
+-- spuzorktrowmble   ∷ Lens Chumble      Spuzz      Gazork       Trowlg
+-- gazorlglesnatchka ∷ Lens Gazork       Trowlg     Bandersnatch Yakka
+-- banderyakoobog    ∷ Lens Bandersnatch Yakka      Foob         Mog
+
+-- resultingLens ∷ Lens Snark JubJub Foob Mog
+-- resultingLens = snajubjumwock . boowockugwup . gruggazinkoom . zinkattumblezz . spuzorktrowmble . gazorlglesnatchka . banderyakoobog
 
 --------------------------------------------------------------------------------------------
 --                                       Operators                                        --
