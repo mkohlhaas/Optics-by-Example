@@ -1337,6 +1337,17 @@ gameState = (Player, Item Wool 5)
 --------------------
 -- Lens Operators --
 --------------------
+
+-- Action     | Operator | Type
+-- -----------+----------+-----------------------------------
+-- flip view  | ^.       | s → Lens' s a → a
+-- set        | .∼       | Lens s t a b → b → s → t
+-- over       | %∼       | Lens s t a b → (a → b) → s → t
+
+--------------------
+-- view a.k.a. ^. --
+--------------------
+
 data Payload = Payload {_weightKilos ∷ Int, _cargo ∷ String} deriving (Show)
 
 newtype Boat = Boat {_payload ∷ Payload} deriving (Show)
@@ -1347,19 +1358,17 @@ makeLenses ''Boat
 serenity ∷ Boat
 serenity = Boat (Payload 50000 "Livestock")
 
---------------------
--- view a.k.a. ^. --
---------------------
-
 -- |
 -- >>> view (payload . cargo) serenity
 -- "Livestock"
 
 -- |
+-- ^. is the FLIPPED version of `view`.
 -- >>> serenity ^. payload . cargo
 -- "Livestock"
 
 -- |
+-- Looks more like Object Oriented property access.
 -- >>> serenity^.payload.cargo
 -- "Livestock"
 
@@ -1372,27 +1381,28 @@ serenity = Boat (Payload 50000 "Livestock")
 -- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
 
 -- |
--- "Take serenity and then, regarding its payload's cargo, set it to Medicine"
 -- >>> serenity & payload . cargo .~ "Medicine"
 -- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
-
--- |
--- Chain multiple set's:
--- >>> serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
--- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
 
 ------------------------------
 -- Chaining Many Operations --
 ------------------------------
 
 -- |
--- Using traditional actions names:
+-- Using traditional actions names.
 -- >>> serenity & set (payload . cargo) "Chocolate" & set (payload . weightKilos) 2310
+-- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+
+-- |
+-- Using operators.
+-- >>> serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
 -- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
 
 --------------------------
 -- Using %∼ a.k.a. over --
 --------------------------
+
+-- % is often the MOD-ulo operator, and `over` MOD-ifies its focus.
 
 -- |
 -- %~ = over
@@ -1402,6 +1412,52 @@ serenity = Boat (Payload 50000 "Livestock")
 ----------------------------
 -- Learning Hieroglyphics --
 ----------------------------
+
+-- ===================================================================
+
+-- |                                                                 |
+-- |  ------------------------                                       |
+-- |  -- Legend for Getters --                                       |
+-- |  ------------------------                                       |
+-- |                                                                 |
+-- |  Symbol | Description                                           |
+-- |  -------+-------------------------------------------------      |
+-- |    ^    | denotes a Getter                                      |
+-- |    @    | include the index with the result                     |
+-- |    .    | get a single value                                    |
+-- |    ..   | get a List of values                                  |
+-- |    ?    | maybe get the first value                             |
+-- |    !    | force a result or throw an exception if missing       |
+-- |                                                                 |
+-- ===================================================================
+
+-- ===================================================================
+
+-- |                                                                 |
+-- | ----------------------------------                              |
+-- | -- Legend for Setters/Modifiers --                              |
+-- | ----------------------------------                              |
+-- |                                                                 |
+-- | Symbol | Description                                            |
+-- | --------+-----------------------------------------------------  |
+-- |   .    | set the focus                                          |
+-- |   %    | modify the focus                                       |
+-- |   ∼    | denotes a Setter/Modifier                              |
+-- |   =    | denotes a Setter/Modifier over a MonadState context    |
+-- |   <    | include the altered focus with the result              |
+-- |   <<   | include the unaltered focus with the result            |
+-- |   %%   | perform a traversal over the focus                     |
+-- |   <>   | `mappend` over the focus                               |
+-- |   ?    | wrap in Just before setting                            |
+-- |   +    | add to the focus                                       |
+-- |   -    | subtract from the focus                                |
+-- |   *    | multiply the focus                                     |
+-- |   //   | divide the focus                                       |
+-- |   ||   | logically or the focus                                 |
+-- |   &&   | logically and the focus                                |
+-- |   @    | pass the index to the modification function            |
+-- |                                                                 |
+-- ===================================================================
 
 -- |
 -- >>> (2, 30) & _2 +~ 5
@@ -1439,9 +1495,6 @@ serenity = Boat (Payload 50000 "Livestock")
 -- Modifiers --
 ---------------
 
------------------
--- Thermometer --
------------------
 newtype Thermometer = Thermometer
   { _temperature ∷ Int
   }
@@ -1455,11 +1508,13 @@ makeLenses ''Thermometer
 
 -- |
 -- Get new focus.
+-- `<` = get the NEW focus in addition to modification
 -- >>> Thermometer 20 & temperature <+~ 15
 -- (35,Thermometer {_temperature = 35})
 
 -- |
 -- Get old focus.
+-- `<<` = get the OLD focus in addition to modification
 -- >>> Thermometer 20 & temperature <<+~ 15
 -- (20,Thermometer {_temperature = 35})
 
@@ -1467,7 +1522,7 @@ makeLenses ''Thermometer
 -- When to use operators vs named actions? --
 ---------------------------------------------
 
--- Author finds it nicer to use the named versions when partially applying lens expressions, and use the operator versions the rest of the time.
+-- Author finds it nicer to use the named versions when PARTIALLY APPLYING lens expressions, and use the operator versions the rest of the time.
 
 -- |
 -- >>> map (view _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
@@ -1486,6 +1541,93 @@ makeLenses ''Thermometer
 -- Author thinks this looks a bit stupid.
 -- >>> map (_2 %~ reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
 -- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
+
+---------------------------
+-- Exercises – Operators --
+---------------------------
+
+-- 1. Consider the following list of types:
+
+data Gate = Gate
+  { _open ∷ Bool,
+    _oilTemp ∷ Float
+  }
+  deriving (Show)
+
+data Army = Army
+  { _archers ∷ Int,
+    _knights ∷ Int
+  }
+  deriving (Show)
+
+data Kingdom = Kingdom
+  { _kname ∷ String,
+    _army ∷ Army,
+    _gate ∷ Gate
+  }
+  deriving (Show)
+
+makeLenses ''Gate
+makeLenses ''Army
+makeLenses ''Kingdom
+
+duloc ∷ Kingdom
+duloc =
+  Kingdom
+    { _kname = "Duloc",
+      _army = Army {_archers = 22, _knights = 14},
+      _gate = Gate {_open = True, _oilTemp = 10.0}
+    }
+
+-- Write a chain of expressions using infix operators to get from the start state to each of the following goal states:
+
+-- |
+-- >>> duloc & kname <>~ ": a perfect place" & army . knights *~ 3 & gate . open &&~ False
+-- Kingdom {_kname = "Duloc: a perfect place", _army = Army {_archers = 22, _knights = 42}, _gate = Gate {_open = False, _oilTemp = 10.0}}
+
+-- |
+-- >>> duloc & kname <>~ "instein" & army . archers -~ 5 & army . knights +~ 12 & gate . oilTemp *~ 10
+-- Kingdom {_kname = "Dulocinstein", _army = Army {_archers = 17, _knights = 26}, _gate = Gate {_open = True, _oilTemp = 100.0}}
+
+-- |
+-- >>> duloc & gate . oilTemp //~ 2 & kname <<>~ ": Home" & _2 . kname <>~ " of the talking Donkeys"
+-- ("Duloc: Home",Kingdom {_kname = "Duloc: Home of the talking Donkeys", _army = Army {_archers = 22, _knights = 14}, _gate = Gate {_open = True, _oilTemp = 5.0}})
+
+-- 2. Enter the appropriate operator in the undefined slot to make each code example consistent:
+
+-- >>> (False, "opossums") `undefined` _1 ||~ True
+-- (True, "opossums")
+
+-- |
+-- >>> (False, "opossums") & _1 ||~ True
+-- (True,"opossums")
+
+-- Remember that id is a lens which focuses the full structure.
+-- >>> 2 & id `undefined` 3
+-- 6
+
+-- |
+-- >>> 2 & id *~ 3
+-- 6
+
+-- >>> ((True, "Dudley"), 55.0)
+--       & _1 . _2 `undefined` " - the worst"
+--       & _2 `undefined` 15
+--       & _2 `undefined` 2
+--       & _1 . _2 `undefined` map toUpper
+--       & _1 . _1 `undefined` False
+-- ((False,"DUDLEY - THE WORST"),20.0)
+
+-- |
+-- >>> ((True, "Dudley"), 55.0) & _1 . _2 <>~ " - the worst" & _2 -~ 15 & _2 //~ 2 & _1 . _2 %~ map toUpper & _1 . _1 .~ False
+-- ((False,"DUDLEY - THE WORST"),20.0)
+
+-- 3. Name a lens operator that takes only two arguments.
+--  view (^.)
+
+-- 4. What's the type signature of %∼? Try to figure it without checking! Look at the examples above if you have to.
+-- %∼ ∷ Lens' s a     → (a → b) → s → s
+-- %∼ ∷ Lens  s t a b → (a → b) → s → t
 
 --------------------------------------------------------------------------------------------
 --                                         Folds                                          --
