@@ -11,10 +11,11 @@ import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
 import Control.Monad.State (MonadIO (..), StateT, execStateT, modify)
 import Data.Bits.Lens (bitAt)
 import Data.ByteString (ByteString)
-import Data.Char (toLower, toUpper)
+import Data.Char (toLower, toUpper, isAlpha, isNumber)
 import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
+import Data.Function (on)
 import Data.List (intercalate, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -150,7 +151,7 @@ import Text.Printf (printf)
 -- "supercalifragilisticexpialidocious"
 
 -------------------------------
--- Exercises – Optic Anatomy --
+-- Exercises - Optic Anatomy --
 -------------------------------
 
 -- |
@@ -762,7 +763,7 @@ fahrenheit = lens getter setter
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
 --------------------------------
--- Exercises – Virtual Fields --
+-- Exercises - Virtual Fields --
 --------------------------------
 
 data User = User
@@ -1008,7 +1009,7 @@ data Preferences a = Preferences
   deriving (Show)
 
 ------------------------------------
--- Exercises – Polymorphic Lenses --
+-- Exercises - Polymorphic Lenses --
 ------------------------------------
 
 -- 1. Write the type signature of the polymorphic lens which would allow changing a Vorpal x to a Vorpal y.
@@ -1278,7 +1279,7 @@ gameState = (Player, Item Wool 5)
 -- Optics compose easily without much boiler-plate, so we should prefer many small precise optics rather than large bulky ones!
 
 ----------------------------------
--- Exercises – Lens Composition --
+-- Exercises - Lens Composition --
 ----------------------------------
 
 -- 1. Fill in the blank with the appropriate composition of tuple lenses in the following statement:
@@ -1413,51 +1414,49 @@ serenity = Boat (Payload 50000 "Livestock")
 -- Learning Hieroglyphics --
 ----------------------------
 
+-- -------------------------------------------------------------------
+--                                                                  --
+--  ------------------------                                        --
+--  -- Legend for Getters --                                        --
+--  ------------------------                                        --
+--                                                                  --
+--  Symbol | Description                                            --
+--  -------+-------------------------------------------------       --
+--    ^    | denotes a Getter                                       --
+--    @    | include the index with the result                      --
+--    .    | get a single value                                     --
+--    ..   | get a List of values                                   --
+--    ?    | maybe get the first value                              --
+--    !    | force a result or throw an exception if missing        --
+--                                                                  --
 -- ===================================================================
 
--- |                                                                 |
--- |  ------------------------                                       |
--- |  -- Legend for Getters --                                       |
--- |  ------------------------                                       |
--- |                                                                 |
--- |  Symbol | Description                                           |
--- |  -------+-------------------------------------------------      |
--- |    ^    | denotes a Getter                                      |
--- |    @    | include the index with the result                     |
--- |    .    | get a single value                                    |
--- |    ..   | get a List of values                                  |
--- |    ?    | maybe get the first value                             |
--- |    !    | force a result or throw an exception if missing       |
--- |                                                                 |
--- ===================================================================
-
--- ===================================================================
-
--- |                                                                 |
--- | ----------------------------------                              |
--- | -- Legend for Setters/Modifiers --                              |
--- | ----------------------------------                              |
--- |                                                                 |
--- | Symbol | Description                                            |
--- | --------+-----------------------------------------------------  |
--- |   .    | set the focus                                          |
--- |   %    | modify the focus                                       |
--- |   ∼    | denotes a Setter/Modifier                              |
--- |   =    | denotes a Setter/Modifier over a MonadState context    |
--- |   <    | include the altered focus with the result              |
--- |   <<   | include the unaltered focus with the result            |
--- |   %%   | perform a traversal over the focus                     |
--- |   <>   | `mappend` over the focus                               |
--- |   ?    | wrap in Just before setting                            |
--- |   +    | add to the focus                                       |
--- |   -    | subtract from the focus                                |
--- |   *    | multiply the focus                                     |
--- |   //   | divide the focus                                       |
--- |   ||   | logically or the focus                                 |
--- |   &&   | logically and the focus                                |
--- |   @    | pass the index to the modification function            |
--- |                                                                 |
--- ===================================================================
+-- -------------------------------------------------------------------
+--                                                                  --
+--  ----------------------------------                              --
+--  -- Legend for Setters/Modifiers --                              --
+--  ----------------------------------                              --
+--                                                                  --
+--  Symbol | Description                                            --
+--  --------+-----------------------------------------------------  --
+--    .    | set the focus                                          --
+--    %    | modify the focus                                       --
+--    ∼    | denotes a Setter/Modifier                              --
+--    =    | denotes a Setter/Modifier over a MonadState context    --
+--    <    | include the altered focus with the result              --
+--    <<   | include the unaltered focus with the result            --
+--    %%   | perform a traversal over the focus                     --
+--    <>   | `mappend` over the focus                               --
+--    ?    | wrap in Just before setting                            --
+--    +    | add to the focus                                       --
+--    -    | subtract from the focus                                --
+--    *    | multiply the focus                                     --
+--    //   | divide the focus                                       --
+--    ||   | logically or the focus                                 --
+--    &&   | logically and the focus                                --
+--    @    | pass the index to the modification function            --
+--                                                                  --
+-- -------------------------------------------------------------------
 
 -- |
 -- >>> (2, 30) & _2 +~ 5
@@ -1543,7 +1542,7 @@ makeLenses ''Thermometer
 -- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
 
 ---------------------------
--- Exercises – Operators --
+-- Exercises - Operators --
 ---------------------------
 
 -- 1. Consider the following list of types:
@@ -1633,6 +1632,16 @@ duloc =
 --                                         Folds                                          --
 --------------------------------------------------------------------------------------------
 
+---------------------------
+-- Introduction to Folds --
+---------------------------
+
+-- Folds are like queries.
+
+-- The key differences between lenses and folds are that:
+-- • Lenses must focus ONE thing, Folds can focus MANY things
+-- • Lenses can get and set, Folds can ONLY get.
+
 ------------------------------------------
 -- Focusing All Elements of a Container --
 ------------------------------------------
@@ -1668,8 +1677,25 @@ roster =
 -- Collapsing the Set --
 ------------------------
 
+-- Generic type of a fold.
+-- This type says that if you give us a structure of type `s` we can find zero or more focuses of type `a`.
+-- Note that a fold only specifies how to find the focuses, not how to combine them!!!
+-- The decision of how to mix them all together is left up to the action.
+-- Fold s a
+
 crewMembers ∷ Fold (Set CrewMember) CrewMember
 crewMembers = folded
+
+-- `folded` takes ANY Foldable container as a structure and will focus each element inside it.
+-- folded ∷ Foldable f ⇒ Fold (f a) a
+
+----------------------------------
+-- Collecting Focuses as a List --
+----------------------------------
+
+-- toListOf and its flipped operator (^..) returns a list of focuses rather than a single focus, like `view` (^.)
+-- toListOf ∷ Fold s a → s → [a]
+-- (^..) ∷ s → Fold s a → [a]
 
 -- |
 -- >>> roster ^.. crewMembers
@@ -1699,29 +1725,22 @@ crewMembers = folded
 -- >>> M.fromList [("Jack", "Captain"), ("Will", "First Mate")] ^.. folded
 -- ["Captain","First Mate"]
 
--- Lenses can be used directly as folds!
+---------------------------
+-- Using Lenses as Folds --
+---------------------------
+
+-- Lenses can be used directly as folds!!!
+-- You can drop in a lens anywhere you need a fold.
 crewRole ∷ Fold CrewMember Role
 crewRole = role
+
+-- When we use a lens as a fold we can mentally substitute the types like this:
+-- `Lens' s a` becomes `Fold s a`
 
 -- |
 -- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
 -- >>> jerry ^. role
 -- PowderMonkey
-
-----------------------------------
--- Collecting Focuses as a List --
-----------------------------------
-
--- Lenses must focus exactly one value, whereas folds can focus many.
--- Similarly, view (a.k.a. (^.)) always retrieves exactly one thing, but toListOf (a.k.a. (^..)) retrieves zero or more values in a list!
-
--- |
--- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
--- >>> jerry ^.. role
--- [PowderMonkey]
-
--- When we use a `lens` as a `fold` we can mentally substitute the types like this:
--- `Lens' s a` becomes `Fold s a`
 
 ---------------------
 -- Composing Folds --
@@ -1731,11 +1750,32 @@ crewRole = role
 -- >>> roster ^.. folded . role
 -- [Gunner,PowderMonkey,Navigator,PowderMonkey]
 
+-- |
+-- crewMembers ∷ Fold (Set CrewMember) CrewMember
+-- crewRole    ∷ Fold CrewMember Role
+-- composes to → Fold (Set CrewMember) Role
+-- Applying (^..) (`toListOf`):
+-- (^..) ∷ s → Fold s a → [a]
+-- Set CrewMember → Fold (Set CrewMember) Role → [Role]
+-- >>> roster ^.. crewMembers . crewRole
+-- [Gunner,PowderMonkey,Navigator,PowderMonkey]
+
+-- |
+-- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+-- >>> jerry ^.. role
+-- [PowderMonkey]
+
+-- When we use a `lens` as a `fold` we can mentally substitute the types like this:
+-- `Lens' s a` becomes `Fold s a`
+
 -----------------------------------
 -- Foundational Fold Combinators --
 -----------------------------------
 
--- both & each
+-- `both` & `each`
+
+-- `both` allows us to fold over BOTH parameters when the parameters are the SAME!
+-- `each` allows us to fold over ALL  parameters when the parameters are the SAME!
 
 -- |
 -- `both` on tuples focuses both at once
@@ -1766,6 +1806,142 @@ crewRole = role
 -- >>> [1, 2, 3, 4, 5] ^.. each
 -- [1,2,3,4,5]
 
+------------------------------
+-- Exercises - Simple Folds --
+------------------------------
+
+-- 1. What's the result of each expression? Make sure to guess before trying it out in the repl!
+
+beastSizes ∷ [(Int, String)]
+beastSizes = [(3, "Sirens"), (882, "Kraken"), (92, "Ogopogo")]
+
+-- |
+-- >>> beastSizes ^.. folded
+-- [(3,"Sirens"),(882,"Kraken"),(92,"Ogopogo")]
+
+-- |
+-- >>> beastSizes ^.. folded . folded
+-- ["Sirens","Kraken","Ogopogo"]
+
+-- |
+-- >>> beastSizes ^.. folded . folded . folded
+-- "SirensKrakenOgopogo"
+
+-- |
+-- >>> beastSizes ^.. folded . _2
+-- ["Sirens","Kraken","Ogopogo"]
+
+-- |
+-- >>> toListOf folded [[1, 2, 3], [4, 5, 6]]
+-- [[1,2,3],[4,5,6]]
+
+-- |
+-- >>> toListOf (folded . folded) [[1, 2, 3], [4, 5, 6]]
+-- [1,2,3,4,5,6]
+
+-- |
+-- >>> toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+-- "CaptainFirst Mate"
+
+-- |
+-- >>> ("Hello", "It's me") ^.. both . folded
+-- "HelloIt's me"
+
+-- |
+-- >>> ("Why", "So", "Serious?") ^.. each
+-- ["Why","So","Serious?"]
+quotes ∷ [(String, String, String)]
+quotes = [("Why", "So", "Serious?"), ("This", "is", "SPARTA")]
+
+-- |
+-- >>> quotes ^.. each
+-- [("Why","So","Serious?"),("This","is","SPARTA")]
+
+-- |
+-- >>> quotes ^.. each . each
+-- ["Why","So","Serious?","This","is","SPARTA"]
+
+-- |
+-- >>> quotes ^.. each . each . each
+-- "WhySoSerious?ThisisSPARTA"
+
+-- 2. Write out the specialized type for each of the requested combinators used in each of the following expressions.
+
+-- a) folded, _1, toListOf
+
+-- |
+-- >>> toListOf (folded . _1) [(1, 'a'), (2, 'b'), (3, 'c')]
+-- [1,2,3]
+
+-- folded ∷ Fold [(Int, Char)] (Int, Char)
+-- _1 ∷ Fold (Int, Char) Int
+-- toListOf ∷ Fold [(Int, Char)] → [(Int, Char)] → [Int]
+
+-- b) _2, folded, toListOf
+
+-- |
+-- >>> toListOf (_2 . folded) (False, S.fromList ["one", "two", "three"])
+-- ["one","three","two"]
+
+-- _2 ∷ Fold (Bool, Set String) (Set String)
+-- folded ∷ Fold (Set String) String
+-- toListOf ∷ Fold (Bool, Set String) String → (Bool, Set String) → [String]
+
+-- c) folded, folded, toListOf
+
+-- |
+-- >>> toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+-- "CaptainFirst Mate"
+
+-- folded ∷ Fold (Map String String) String
+-- folded ∷ Fold String Char
+-- toListOf ∷ Fold (Map String String) Char → (Map String String) → String
+
+-- 3. Fill in the blank with the appropriate fold to get the specified results
+
+-- [1, 2, 3] ^.. _
+-- [1, 2, 3]
+
+-- ("Light", "Dark") ^.. _
+-- ["Light"]
+
+-- [("Light", "Dark"), ("Happy", "Sad")] ^.. _
+-- ["Light","Dark","Happy","Sad"]
+
+-- [("Light", "Dark"), ("Happy", "Sad")] ^.. _
+-- ["Light","Happy"]
+
+-- [("Light", "Dark"), ("Happy", "Sad")] ^.. _
+-- "DarkSad"
+
+-- ("Bond", "James", "Bond") ^.. _
+-- ["Bond","James","Bond"]
+
+-- Solutions:
+
+-- |
+-- >>> [1, 2, 3] ^.. folded
+-- [1,2,3]
+
+-- >>> ("Light", "Dark") ^.. _1
+-- ["Light"]
+
+-- |
+-- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . both
+-- ["Light","Dark","Happy","Sad"]
+
+-- |
+-- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . _1
+-- ["Light","Happy"]
+
+-- |
+-- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . folded . folded
+-- "DarkSad"
+
+-- |
+-- >>> ("Bond", "James", "Bond") ^.. each
+-- ["Bond","James","Bond"]
+
 ------------------
 -- Custom Folds --
 ------------------
@@ -1773,6 +1949,7 @@ crewRole = role
 newtype Name = Name {getName ∷ String}
   deriving (Show)
 
+-- Not foldable, not even having a type parameter!
 data ShipCrew = ShipCrew
   { _ship ∷ Name,
     _captain ∷ Name,
@@ -1783,9 +1960,19 @@ data ShipCrew = ShipCrew
 
 makeLenses ''ShipCrew
 
-collectCrewMembers ∷ ShipCrew → [Name]
-collectCrewMembers crew = [_captain crew, _firstMate crew] ++ _conscripts crew
+-- When working with lenses we had the `lens` helper which allowed us to define arbitrary lenses;
+-- the equivalent helper for folds is called `folding`.
+--
+-- folding ∷ Foldable f ⇒ (s → f a) → Fold s a
+--
+-- This helper takes a projection function and returns a Fold.
+-- The projection function is polymorphic over the type of Foldable it returns, but typically we just use a List.
 
+-- projection function
+collectCrewMembers ∷ ShipCrew → [Name]
+collectCrewMembers crew = [_captain crew, _firstMate crew] <> _conscripts crew
+
+-- `folding` creates a Fold.
 allCrewMembers ∷ Fold ShipCrew Name
 allCrewMembers = folding collectCrewMembers
 
@@ -1802,16 +1989,18 @@ myCrew =
 -- >>> myCrew ^.. allCrewMembers
 -- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
 
--- =====================================================================================================================================
-
--- | RULE: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! |
--- =====================================================================================================================================
-
 ------------------------
 -- Mapping over Folds --
 ------------------------
 
--- The to helper is pretty simple, it converts a function directly into a fold!
+-- ------------------------------------------------------------------------------------------------------------------------------------
+-- RULE: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! --
+--       Stay in the Optics world - it's very composable and resusable!
+-- ------------------------------------------------------------------------------------------------------------------------------------
+
+-- The `to` helper is pretty simple, it converts a function directly into a fold!
+-- to ∷ (s → a) → Fold s a
+-- It's like mapping over the Fold.
 
 -- |
 -- >>> Name "Two-faced Tony" ^. to getName
@@ -1823,10 +2012,14 @@ myCrew =
 -- "TWO-FACED TONY"
 
 -- |
--- Or simply use function composition before passing to `to`
--- However, I find it confusing to switch from reading
--- left-to-right into right-to-left like this:
+-- Or simply use function composition before passing to `to`.
+-- However, I find it confusing to switch from reading left-to-right into right-to-left like this:
 -- >>> Name "Two-faced Tony" ^. to (fmap toUpper . getName)
+-- "TWO-FACED TONY"
+
+-- |
+-- Why not?
+-- >>> Name "Two-faced Tony" ^. to (getName >>> fmap toUpper)
 -- "TWO-FACED TONY"
 
 -- |
@@ -1838,6 +2031,7 @@ myCrew =
 -- Combining Multiple Folds on the Same Structure --
 ----------------------------------------------------
 
+-- Every lens is a valid fold.
 crewNames ∷ Fold ShipCrew Name
 crewNames =
   folding
@@ -1851,9 +2045,136 @@ crewNames =
 -- >>> myCrew ^.. crewNames . to getName
 -- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
 
+------------------------------
+-- Exercises - Custom Folds --
+------------------------------
+
+-- 1. Fill in each blank with either `to`, `folded`, or `folding`.
+
+-- >>> ["Yer", "a", "wizard", "Harry"] ^.. folded . _
+-- "YerawizardHarry"
+
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . _ (take 2)
+-- [1, 2, 4, 5]
+
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . _ (take 2)
+-- [[1,2], [4,5]]
+
+-- >>> ["bob", "otto", "hannah"] ^.. folded . _ reverse
+-- ["bob", "otto", "hannah"]
+
+-- >>> ("abc", "def") ^.. _ (\(a, b) → [a, b]). _ reverse . _
+-- "cbafed"
+
+-- Solutions:
+
+-- |
+-- >>> ["Yer", "a", "wizard", "Harry"] ^.. folded . folded
+-- "YerawizardHarry"
+
+-- |
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . folding (take 2)
+-- [1,2,4,5]
+
+-- |
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . to (take 2)
+-- [[1,2],[4,5]]
+
+-- |
+-- >>> ["bob", "otto", "hannah"] ^.. folded . to reverse
+-- ["bob","otto","hannah"]
+
+-- |
+-- >>> ("abc", "def") ^.. folding (\(a, b) → [a, b]) . to reverse . folded
+-- "cbafed"
+
+-- 2. Fill in the blank for each of the following expressions with a path of folds which results in the specified answer.
+-- Avoid partial functions and fmap.
+
+-- The blanks were all at the end of the expression, e.g.  "[1..5] ^.. _"
+
+-- |
+-- >>> [1..5] ^.. folded . to (* 100)
+-- [100,200,300,400,500]
+
+-- |
+-- >>> (1, 2) ^.. each
+-- [1,2]
+
+-- |
+-- >>> [(1, "one"), (2, "two")] ^.. folded . folded
+-- ["one","two"]
+
+-- |
+-- >>> (Just 1, Just 2, Just 3) ^.. each . folded
+-- [1,2,3]
+
+-- |
+-- >>> [Left 1, Right 2, Left 3] ^.. folded . folded
+-- [2]
+
+-- |
+-- >>> [([1, 2], [3, 4]), ([5, 6], [7, 8])] ^.. folded . both . folded
+-- [1,2,3,4,5,6,7,8]
+
+-- |
+-- >>> [1, 2, 3, 4] ^.. folded . to (\n → if odd n then Left n else Right n)
+-- [Left 1,Right 2,Left 3,Right 4]
+
+-- |
+-- >>> [(1, (2, 3)), (4, (5, 6))] ^.. folded . folding (\(x, (y, z)) → [x, y, z])
+-- [1,2,3,4,5,6]
+
+-- |
+-- >>> [(Just 1, Left "one"), (Nothing, Right 2)] ^.. folded . folding (\(x, y) → x ^.. folded <> y ^.. folded)
+-- [1,2]
+
+-- |
+-- >>> [(1, "one"), (2, "two")] ^.. folded . folding (\(x, y) → [Left x, Right y])
+-- [Left 1,Right "one",Left 2,Right "two"]
+
+-- |
+-- >>> S.fromList ["apricots", "apples"] ^.. folded . to reverse . folded
+-- "selppastocirpa"
+
+-- |
+-- >>> S.fromList ["apricots", "apples"] ^.. folded . folding reverse
+-- "selppastocirpa"
+
+-- See the pattern!
+-- to fn . folded == folding fn
+
+-- 3. BONUS - Devise a fold which returns the expected results. Think outside the box a bit.
+
+-- |
+-- >>> [(12, 45, 66), (91, 123, 87)] ^.. folded . _2 . to show . to reverse . folded
+-- "54321"
+
+-- |
+-- >>> [(1, "a"), (2, "b"), (3, "c"), (4, "d")] ^.. folded . folding (\(x, y) → if even x then [y] else [])
+-- ["b","d"]
+
+------------------
+-- Fold Actions --
+------------------
+
 --------------------------------
 -- Writing Queries with Folds --
 --------------------------------
+
+-- A rule of thumb when looking for which action to use on a fold: think of the function you'd use
+-- on normal ol’ Haskell list for the same purpose, then just add the suffix -Of!
+-- sum → sumOf
+-- minimum → minimumOf
+
+-- sumOf ∷ Num a ⇒ Getting (Endo (Endo a)) s a → s → a
+
+-- It's really really not important to actually know what a Getting (Endo (Endo a)) is; I don't
+-- personally know the actual types of most of these actions. What I DO know though is that when
+-- I see a Getting (Some Crazy Type) s a I know I can substitute nearly any optic into that slot,
+-- including a (Fold s a) or a (Lens' s a). The “behind the scenes” types can unify themselves with
+-- the (Some Crazy Type) portion of a Getter; so usually I mentally just substitute any Getting _ s a
+-- with a Fold s a.
 
 -- |
 -- Does my fold contain a given element?
@@ -1870,7 +2191,7 @@ crewNames =
 -- True
 
 -- |
--- >>> anyOf folded (>10) [1, 2, 3, 4]
+-- >>> anyOf folded (> 10) [1, 2, 3, 4]
 -- False
 
 -- |
@@ -1879,7 +2200,7 @@ crewNames =
 -- False
 
 -- |
--- >>> allOf folded (<10) [1, 2, 3, 4]
+-- >>> allOf folded (< 10) [1, 2, 3, 4]
 -- True
 
 -- |
@@ -1888,7 +2209,7 @@ crewNames =
 -- Just 2
 
 -- |
--- >>> findOf folded (>10) [1, 2, 3, 4]
+-- >>> findOf folded (> 10) [1, 2, 3, 4]
 -- Nothing
 
 -- |
@@ -1968,8 +2289,6 @@ crewNames =
 -- Queries Case Study --
 ------------------------
 
--- TV Shows
-
 data Actor = Actor
   { _actorName ∷ String,
     _birthYear ∷ Int
@@ -2040,13 +2359,14 @@ tvShows = [howIMetYourMother, buffy]
 -- >>> _title <$> maximumByOf folded (comparing _criticScore) tvShows
 -- Just "How I Met Your Mother"
 
--- |
--- >>> minimumByOf (folded . actors . folded) (comparing _birthYear) tvShows
--- Just (Actor {_actorName = "Anthony Head", _birthYear = 1954})
-
+-- Let's make this look nicer with a custom function.
 -- `comparingOf` accepts a lens and will return the sort of comparator function that actions like `minimumByOf` expects.
 comparingOf ∷ Ord a ⇒ Lens' s a → (s → s → Ordering)
 comparingOf l = comparing (view l)
+
+-- |
+-- >>> _title <$> maximumByOf folded (comparingOf criticScore) tvShows
+-- Just "How I Met Your Mother"
 
 -- |
 -- >>> minimumByOf (folded . actors . folded) (comparingOf birthYear) tvShows
@@ -2055,6 +2375,16 @@ comparingOf l = comparing (view l)
 --------------------------
 -- Folding with Effects --
 --------------------------
+
+-- `for_`, `traverse_`, and `mapM_` do the same thing but with different argument orderings.
+-- `mapM_` has a Monad constraint instead of Applicative, an unfortunate result of the fact
+-- that Applicative was discovered after Monad, so I recommend sticking with `for_` and `traverse_` !
+
+-- traverse_ ∷ (Foldable t, Applicative f) ⇒ (a → f b) → t a → f ()
+-- traverseOf_ ∷ Functor f ⇒ Fold s a → (a → f r) → s → f ()
+
+-- for_ ∷ (Foldable t, Applicative f) ⇒ t a → (a → f b) → f ()
+-- forOf_ ∷ Functor f ⇒ Fold s a → s → (a → f r) → f ()
 
 calcAge ∷ Actor → Int
 calcAge actor = 2030 - _birthYear actor
@@ -2085,13 +2415,25 @@ showActor actor = _actorName actor <> ": " <> show (calcAge actor)
 -- Combining Fold Results --
 ----------------------------
 
+-- foldOf ∷ Monoid a ⇒ Fold s a → s → a
+-- foldMapOf ∷ Monoid r ⇒ Fold s a → (a → r) → s → r
+
 -- |
+-- A tuple of two Monoids is also a Monoid!
 -- >>> (Sum 1, Sum 32) <> (Sum 1, Sum 20)
 -- (Sum {getSum = 2},Sum {getSum = 52})
 
--- transform actor to monoid
+-- Transform actor into Monoid.
 ageSummary ∷ Actor → (Sum Int, Sum Int)
 ageSummary actor = (Sum 1, Sum (calcAge actor))
+
+-- |
+-- >>> tvShows ^.. (folded . actors . folded)
+-- [Actor {_actorName = "Josh Radnor", _birthYear = 1974},Actor {_actorName = "Cobie Smulders", _birthYear = 1982},Actor {_actorName = "Neil Patrick Harris", _birthYear = 1973},Actor {_actorName = "Alyson Hannigan", _birthYear = 1974},Actor {_actorName = "Jason Segel", _birthYear = 1980},Actor {_actorName = "Sarah Michelle Gellar", _birthYear = 1977},Actor {_actorName = "Alyson Hannigan", _birthYear = 1974},Actor {_actorName = "Nicholas Brendon", _birthYear = 1971},Actor {_actorName = "David Boreanaz", _birthYear = 1969},Actor {_actorName = "Anthony Head", _birthYear = 1954}]
+
+-- |
+-- >>> tvShows ^.. (folded . actors . folded . to ageSummary)
+-- [(Sum {getSum = 1},Sum {getSum = 56}),(Sum {getSum = 1},Sum {getSum = 48}),(Sum {getSum = 1},Sum {getSum = 57}),(Sum {getSum = 1},Sum {getSum = 56}),(Sum {getSum = 1},Sum {getSum = 50}),(Sum {getSum = 1},Sum {getSum = 53}),(Sum {getSum = 1},Sum {getSum = 56}),(Sum {getSum = 1},Sum {getSum = 59}),(Sum {getSum = 1},Sum {getSum = 61}),(Sum {getSum = 1},Sum {getSum = 76})]
 
 -- |
 -- >>> foldOf (folded . actors . folded . to ageSummary) tvShows
@@ -2106,6 +2448,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- 57.2
 
 -- |
+-- `foldMapOf` allows to transform data into a Monoid before we fold it.
 -- >>> computeAverage $ foldMapOf (folded . actors . folded) ageSummary tvShows
 -- 57.2
 
@@ -2113,12 +2456,17 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- Using ‘view’ on Folds --
 ---------------------------
 
--- A very common mistake when people get started with folds is to accidentally use (^.) or view on a
--- fold instead of a lens. This is especially confusing because it actually works in some cases but not
--- others.
+-- A very common mistake when people get started with folds is to use `view` (^.) on a Fold instead of a Lens.
+-- This is especially confusing because it actually works in some cases but not others.
+
+-- This situation is actually caused by a bit of Lens's implementation "leaking" out.
+-- The implementation of `view` accepts any type of optic, but adds constraints which usually only work on a Lens.
+-- HOWEVER, if the focus you're viewing happens to be a Monoid it can "view" through the Fold by using the Monoid typeclass.
+
+-- In general you should avoid this "weird" behaviour and just use `foldOf` explicitly when you want this behaviour!!!
 
 -- |
--- This works just fine
+-- This works just fine.
 -- >>> Just "do it" ^. folded
 -- "do it"
 
@@ -2127,7 +2475,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- No instance for (Monoid Int) arising from a use of ‘folded’
 
 -- |
--- When there's a single focus, we just return it
+-- When there's a single focus, we just return it.
 -- >>> Just "do it" ^. folded
 -- "do it"
 
@@ -2141,14 +2489,19 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> ("one", "two", "three") ^. each
 -- "onetwothree"
 
--- In general you should avoid this "weird" behaviour and just use `foldOf` explicitly when you want this behaviour.
-
 --------------------------------
 -- Customizing Monoidal Folds --
 --------------------------------
 
+-- Lots of mapping folds to choose from.
+-- `foldByOf`, `foldMapByOf`, `foldrOf`, `foldlOf`, ...
+
 -- |
--- >>> foldMapOf (folded . actors . folded . actorName) (\n → M.singleton n 1) tvShows
+-- >>> foldMapOf (folded . actors . folded . actorName) (\name → M.singleton name 1) tvShows
+-- fromList [("Alyson Hannigan",1),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
+
+-- |
+-- >>> foldMapOf (folded . actors . folded . actorName) (flip M.singleton 1) tvShows
 -- fromList [("Alyson Hannigan",1),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
 
 -- |
@@ -2163,16 +2516,155 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 
 -- |
 -- "Alyson Hannigan" is in both shows.
--- >>> foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (\n → M.singleton n 1) tvShows
+-- >>> foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (flip M.singleton 1) tvShows
 -- fromList [("Alyson Hannigan",2),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
+
+------------------------------
+-- Exercises - Fold Actions --
+------------------------------
+
+-- Consider the following list of actions for the exercises below:
+
+-- elemOf ∷ Eq a ⇒ Fold s a → a → s → Bool
+-- has ∷ Fold s a → s → Bool
+-- lengthOf ∷ Fold s a → s → Int
+-- sumOf ∷ Num n ⇒ Fold s n → s → n
+-- productOf ∷ Num n ⇒ Fold s n → s → n
+-- foldOf ∷ Monoid a ⇒ Fold s a → s → a
+-- preview ∷ Fold s a → s → Maybe a
+-- lastOf ∷ Fold s a → s → Maybe a
+-- minimumOf ∷ Ord a ⇒ Fold s a → s → Maybe a
+-- maximumOf ∷ Ord a ⇒ Fold s a → s → Maybe a
+-- anyOf ∷ Fold s a → (a → Bool) → s → Bool
+-- allOf ∷ Fold s a → (a → Bool) → s → Bool
+-- findOf ∷ Fold s a → (a → Bool) → s → Maybe a
+-- foldrOf ∷ Fold s a → (a → r → r) → r → s → r
+-- foldMapOf ∷ Monoid r ⇒ Fold s a → (a → r) → s → r
+
+-- 1. Pick the matching action from the list for each example:
+
+-- >>> _ folded []
+-- False
+
+-- >>> _ both ("Yo", "Adrian!")
+-- "YoAdrian!"
+
+-- >>> _ each "phone" ("E.T.", "phone", "home")
+-- True
+
+-- >>> _ folded [5, 7, 2, 3, 13, 17, 11]
+-- Just 2
+
+-- >>> _ folded [5, 7, 2, 3, 13, 17, 11]
+-- Just 11
+
+-- >>> _ folded ((> 9) . length) ["Bulbasaur", "Charmander", "Squirtle"]
+-- True
+
+-- >>> _ folded even [11, 22, 3, 5, 6]
+-- Just 22
+
+-- Solutions:
+
+-- |
+-- >>> has folded []
+-- False
+
+-- |
+-- >>> foldOf both ("Yo", "Adrian!")
+-- "YoAdrian!"
+
+-- |
+-- >>> elemOf each "phone" ("E.T.", "phone", "home")
+-- True
+
+-- |
+-- >>> minimumOf folded [5, 7, 2, 3, 13, 17, 11]
+-- Just 2
+
+-- |
+-- >>> lastOf folded [5, 7, 2, 3, 13, 17, 11]
+-- Just 11
+
+-- |
+-- >>> anyOf folded ((> 9) . length) ["Bulbasaur", "Charmander", "Squirtle"]
+-- True
+
+-- |
+-- >>> findOf folded even [11, 22, 3, 5, 6]
+-- Just 22
+
+-- 2. Use an action from the list along with any fold you can devise to retrieve the output from the input in each of the following challenges.
+
+-- Is there a palindrome?
+-- input = ["umbrella", "olives", "racecar", "hammer"]
+-- output = Just "racecar"
+
+-- |
+-- >>> findOf folded (\x → x == reverse x) ["umbrella", "olives", "racecar", "hammer"]
+-- Just "racecar"
+
+-- Are all elements even?
+-- input = (2, 4, 6)
+-- output = True
+
+-- |
+-- >>> allOf each even (2, 4, 6)
+-- True
+
+-- Find pair with the largest integer.
+-- input = [(2, "I'll"), (3, "Be"), (1, "Back")]
+-- output = Just (3,"Be")
+
+-- |
+-- >>> maximumOf folded [(2, "I'll"), (3, "Be"), (1, "Back")]
+-- Just (3,"Be")
+
+-- Find the sum of both elements of a tuple.
+-- input = (1, 2)
+-- output = 3
+
+-- |
+-- >>> sumOf each (1, 2)
+-- 3
+
+-- 3. BONUS – These are a bit trickier
+
+-- Find which word in a string has the most vowels.
+-- input = "Do or do not, there is no try."
+-- output = Just "there"
+
+-- |
+-- >>> maximumByOf worded (compare `on` (length . filter (`elem` "aeiou"))) "Do or do not, there is no try."
+-- Just "there"
+
+-- Combine the elements into the expected String
+-- input = ["a", "b", "c"]
+-- output = "cba"
+
+-- |
+-- >>> ["a", "b", "c"] ^.. to reverse . folded . folded
+-- "cba"
+
+-- |
+-- >>> foldByOf folded (flip (<>)) "" ["a", "b", "c"]
+-- "cba"
 
 ------------------------
 -- Higher Order Folds --
 ------------------------
 
+-- These sorts of combinators are higher-order, because usually they accept an optic as an argument and return a new one as a result.
+
 ----------------------
 -- Taking, Dropping --
 ----------------------
+
+-- There are many more signatures but here are the ones for Fold.
+-- taking   ∷ Int → Fold s a → Fold s a
+-- dropping ∷ Int → Fold s a → Fold s a
+
+-- e.g.  `(taking 3)` accepts a Fold which focuses the first three focuses.
 
 -- |
 -- >>> [1, 2, 3, 4] ^.. taking 2 folded
@@ -2199,11 +2691,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- "AlbDum"
 
 -- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded
--- [[1,2,3],[10,20,30],[100,200,300]]
-
--- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. (folded . folded)
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . folded
 -- [1,2,3,10,20,30,100,200,300]
 
 -- |
@@ -2213,6 +2701,14 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- |
 -- >>> ("Albus", "Dumbledore") ^.. folded
 -- ["Dumbledore"]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. both
+-- ["Albus","Dumbledore"]
+
+-- |
+-- >>> ("Albus", "Dumbledore") ^.. taking 3 both
+-- ["Albus","Dumbledore"]
 
 -- |
 -- >>> ("Albus", "Dumbledore") ^.. both . folded
@@ -2266,6 +2762,9 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- Backwards --
 ---------------
 
+-- Another higher-order Fold.
+-- backwards ∷ Fold s a → Fold s a
+
 -- |
 -- >>> [1, 2, 3] ^.. backwards folded
 -- [3,2,1]
@@ -2273,6 +2772,10 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- |
 -- >>> ("one", "two") ^.. backwards both
 -- ["two","one"]
+
+-- |
+-- >>> [(1, 2), (3, 4)] ^.. folded
+-- [(1,2),(3,4)]
 
 -- |
 -- >>> [(1, 2), (3, 4)] ^.. folded . both
@@ -2294,29 +2797,184 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- TakingWhile, DroppingWhile --
 --------------------------------
 
+-- Two more higher-order folds.
+-- takingWhile   ∷ (a → Bool) → Fold s a → Fold s a
+-- droppingWhile ∷ (a → Bool) → Fold s a → Fold s a
+
 -- |
--- >>> [1, 5, 15, 5, 1] ^.. takingWhile (<10) folded
+-- >>> [1, 5, 15, 5, 1] ^.. takingWhile (< 10) folded
 -- [1,5]
 
 -- |
--- >>> [1..100] ^.. takingWhile (<10) folded
+-- >>> [1..100] ^.. takingWhile (< 10) folded
 -- [1,2,3,4,5,6,7,8,9]
 
 -- |
--- >>> [1..] ^.. takingWhile (<10) folded
+-- >>> [1..] ^.. takingWhile (< 10) folded
 -- [1,2,3,4,5,6,7,8,9]
 
 -- |
--- >>> [1..100] ^.. droppingWhile (<90) folded
+-- >>> [1..100] ^.. droppingWhile (< 90) folded
 -- [90,91,92,93,94,95,96,97,98,99,100]
 
 -- |
--- >>> [1, 5, 15, 5, 1] ^.. droppingWhile (<10) folded
+-- >>> [1, 5, 15, 5, 1] ^.. droppingWhile (< 10) folded
 -- [15,5,1]
+
+------------------------------------
+-- Exercises - Higher Order Folds --
+------------------------------------
+
+-- 1. Fill in the blank. You'll need to remember some tricks from previous sections!
+
+-- >>> "Here's looking at you, kid" ^.. _ 7 folded
+-- "looking at you, kid"
+
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . taking 1 _
+-- ["My","Hakuna","No"]
+
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. _
+-- ["My"]
+
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . _
+-- "MyHakunaNo"
+
+-- >>> import Data.Char (isAlpha)
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . _
+-- "MyHakunaNo"
+
+-- >>> _ (10, 50, 100)
+-- 60
+
+-- >>> ("stressed", "guns", "evil") ^.. _ each
+-- ["evil","guns","stressed"]
+
+-- >>> ("stressed", "guns", "evil") ^.. backwards each . to _
+-- ["live","snug","desserts"]
+
+-- >>> import Data.Char (isAlpha)
+-- >>> "blink182 k9 blazeit420" ^.. _
+-- "1829420"
+
+-- Solutions:
+
+-- |
+-- >>> "Here's looking at you, kid" ^.. dropping 7 folded
+-- "looking at you, kid"
+
+-- |
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . taking 1 worded
+-- ["My","Hakuna","No"]
+
+-- |
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. taking 1 (folded . worded)
+-- ["My"]
+
+-- |
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . (taking 1 worded) . folded
+-- "MyHakunaNo"
+
+-- |
+-- Using `isAlpha`.
+-- >>> ["My Precious", "Hakuna Matata", "No problemo"] ^.. folded . takingWhile isAlpha folded
+-- "MyHakunaNo"
+
+-- |
+-- >>> sumOf (taking 2 each) (10, 50, 100)
+-- 60
+
+-- |
+-- >>> ("stressed", "guns", "evil") ^.. backwards each
+-- ["evil","guns","stressed"]
+
+-- |
+-- >>> ("stressed", "guns", "evil") ^.. backwards each . to reverse
+-- ["live","snug","desserts"]
+
+-- |
+-- >>> "blink182 k9 blazeit420" ^.. to (filter isNumber) . folded
+-- "1829420"
+
+-- |
+-- >>> "blink182 k9 blazeit420" ^.. worded . droppingWhile isAlpha folded
+-- "1829420"
+
+-- 2. Solve the following problems using higher-order folds:
+
+-- We're doing a temperature study in a given region, but we need to run tests on several subsets of the data.
+-- Here's the series of daily temperature measurements we've been given for the region:
+
+sample ∷ [Int]
+sample = [-10, -5, 4, 3, 8, 6, -2, 3, -5, -7]
+
+-- First we're interested in how many days it took until the first thaw.
+-- Write an expression which calculates the number of measurements until a temp is above zero.
+
+-- |
+-- >>> lengthOf (takingWhile (< 0) folded) sample
+-- 2
+
+-- |
+-- How many days in the data set?
+-- >>> lengthOf folded sample
+-- 10
+
+-- We need to know the warmest it got in the first 4 days of the sample.
+-- Write an expression to calculate it.
+
+-- |
+-- >>> maximumOf (taking 4 folded) sample
+-- Just 4
+
+-- Write an expression to calculate the temperature on the day AFTER we hit that temperature.
+-- Use preview or ^? somewhere in that expression if you can.
+
+-- |
+-- >>> let maxTemp = maybe 1000 id (maximumOf (taking 4 folded) sample)
+-- >>> sample ^? dropping 1 (droppingWhile (/= maxTemp) folded)
+-- Just 3
+
+-- How many days of below-freezing weather did we have consecutively at the END of the sample?
+
+-- |
+-- >>> length $ sample ^.. takingWhile (< 0) (backwards folded)
+-- 2
+
+-- |
+-- >>> lengthOf (takingWhile (< 0) (backwards folded)) sample
+-- 2
+
+-- Now we're interested in running statistics on temperature data specifically from the first thaw until the next freeze.
+-- Write an expression which lists out all temperature samples from the first time we sample above 0, until the next time we're below zero.
+
+-- |
+-- We can combine multiple modifiers to get this behaviour.
+-- We drop all leading negative temperatures and then take temperatures until another freeze!
+-- >>> sample ^.. takingWhile (> 0) (droppingWhile (< 0) folded)
+-- [4,3,8,6]
+
+-- BONUS: List out all the temperature samples between the FIRST thaw and the FINAL freeze.
+
+-- |
+-- >>> sample ^.. backwards (droppingWhile (< 0) (backwards (droppingWhile (< 0) folded)))
+-- [4,3,8,6,-2,3]
+
+-- Generalize this behaviour into a function: `trimmingWhile`.
+-- It should drop elements from the start AND end of a fold while a predicate is True.
+
+trimmingWhile ∷ (a → Bool) → Fold s a → Fold s a
+trimmingWhile predicate = backwards . droppingWhile predicate . backwards . droppingWhile predicate
 
 ---------------------
 -- Filtering Folds --
 ---------------------
+
+--------------
+-- Filtered --
+--------------
+
+-- Its type.
+-- filtered ∷ (s → Bool) → Fold s s
 
 -- |
 -- >>> [1, 2, 3, 4] ^.. folded . filtered even
@@ -2326,11 +2984,8 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> ["apple", "passionfruit", "orange", "pomegranate"] ^.. folded . filtered ((> 6) . length)
 -- ["passionfruit","pomegranate"]
 
------------
--- Cards --
------------
+-- The power comes from using `filtered` in the midst of other folds!!!
 
--- A data structure to represent a single card
 data Card = Card
   { _cardName ∷ String,
     _aura ∷ Aura,
@@ -2390,25 +3045,24 @@ deck =
 -- [20,20,20,10,30,50,40,3,30,40,40,50]
 
 -- |
-
---- List all cards which have ANY move with an attack power greater than 40
+--- List all cards which have ANY move with an attack power greater than 40.
 -- >>> deck ^.. folded . filtered (anyOf (moves . folded . movePower) (> 40)) . cardName
 -- ["Elecdude","Sparkeon"]
 
 -- |
 -- How many moves do my Spark cards have in total?
--- >>> lengthOf ( folded . filtered ((== Spark) . _aura) . moves . folded ) deck
+-- >>> lengthOf (folded . filtered ((== Spark) . _aura) . moves . folded ) deck
 -- 5
 
 -- |
--- List all my Spark Moves with a power greater than 30
+-- List all my Spark Moves with a power greater than 30.
 -- >>> deck ^.. folded . filtered ((== Spark) . _aura) . moves . folded . filtered ((> 30) . _movePower) . moveName
 -- ["Asplode","Shock","Battery"]
 
 -- |
 -- Using `filteredBy` we can pass a fold instead of a predicate!
 -- We can continue to think in folds and keep reading left-to-right.
--- >>> deck ^.. folded . filteredBy (aura . only Spark) . moves . folded . filteredBy (movePower . filtered (>30)) . moveName
+-- >>> deck ^.. folded . filteredBy (aura . only Spark) . moves . folded . filteredBy (movePower . filtered (> 30)) . moveName
 -- ["Asplode","Shock","Battery"]
 
 -- `only` is a utility fold.
@@ -2434,6 +3088,63 @@ deck =
 -- Get the holographic card which has the largest number of moves
 -- >>> maximumByOf (folded . filtered _holo) (comparing (lengthOf moves)) deck
 -- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
+
+---------------------------
+-- Exercises – Filtering --
+---------------------------
+
+-- Use a fold to answer each of the questions about my card collection:
+
+-- |
+-- List all the cards whose name starts with 'K'.
+-- >>> deck ^.. folded . filtered ((\name → head name == 'K') . _cardName)
+-- [Card {_cardName = "Kapichu", _aura = Spark, _holo = False, _moves = [Move {_moveName = "Poke", _movePower = 10},Move {_moveName = "Zap", _movePower = 30}]}]
+
+-- |
+-- List all the cards whose name starts with 'K'.
+-- >>> deck ^.. folded . filteredBy (cardName . filtered (\name → head name == 'K'))
+-- [Card {_cardName = "Kapichu", _aura = Spark, _holo = False, _moves = [Move {_moveName = "Poke", _movePower = 10},Move {_moveName = "Zap", _movePower = 30}]}]
+
+-- |
+-- This lists the card names but not the cards itself!
+-- >>> deck ^.. folded . cardName . filtered ((== 'K') . head)
+-- ["Kapichu"]
+
+-- |
+-- What's the lowest attack power of all moves?
+-- >>> minimumOf (folded . moves . folded . movePower) deck
+-- Just 3
+
+-- |
+-- What's the name of the first card which has more than one move?
+-- >>> head $ deck ^.. folded . filtered ((> 1) . length . _moves) . cardName
+-- "Kapichu"
+
+-- |
+-- Are there any Hot cards with a move with more than 30 attack power?
+-- >>> anyOf (folded . (filtered ((== Hot) . _aura)) . moves . folded . movePower) (> 30) deck
+-- True
+
+-- |
+-- Are there any Hot cards with a move with more than 40 attack power?
+-- >>> anyOf (folded . (filtered ((== Hot) . _aura)) . moves . folded . movePower) (> 40) deck
+-- False
+
+-- |
+-- List the names of all holographic cards with a Wet aura.
+-- >>> deck ^.. folded . filtered _holo . filteredBy (aura . only Wet) .cardName
+-- ["Garydose"]
+
+-- |
+-- What's the sum of all attack power for all moves belonging to non-Leafy cards?
+-- >>> sumOf (folded . filtered ((/= Leafy) . _aura) . moves . folded . movePower) deck
+-- 303
+
+---------------
+-- Fold Laws --
+---------------
+
+-- There aren't any!
 
 --------------------------------------------------------------------------------------------
 --                                       Traversals                                       --
