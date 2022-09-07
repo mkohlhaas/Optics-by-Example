@@ -9,8 +9,8 @@ executable optics-by-example
     default-extensions:
         DeriveFoldable FlexibleContexts FlexibleInstances
         FunctionalDependencies InstanceSigs MultiParamTypeClasses
-        RankNTypes ScopedTypeVariables TemplateHaskell TupleSections
-        TypeApplications TypeFamilies UnicodeSyntax
+        NamedFieldPuns RankNTypes ScopedTypeVariables TemplateHaskell
+        TupleSections TypeApplications TypeFamilies UnicodeSyntax
 
     build-depends:
         aeson >=2.1.0 && <2.2,

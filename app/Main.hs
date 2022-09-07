@@ -1,17 +1,15 @@
-{-# LANGUAGE NamedFieldPuns #-}
-
 module Main where
 
-import Control.Applicative (Applicative (liftA2), (<|>))
+import Control.Applicative (Applicative (liftA2), ZipList (ZipList), (<|>))
 import Control.Arrow ((>>>))
 import Control.Lens
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
-import Control.Monad.State (MonadIO (..), StateT, execStateT, modify)
+import Control.Monad.State
 import Data.Bits.Lens (bitAt)
 import Data.ByteString (ByteString)
-import Data.Char (toLower, toUpper, isAlpha, isNumber)
+import Data.Char (isAlpha, isNumber, toLower, toUpper)
 import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
@@ -2628,7 +2626,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> sumOf each (1, 2)
 -- 3
 
--- 3. BONUS – These are a bit trickier
+-- 3. BONUS - These are a bit trickier
 
 -- Find which word in a string has the most vowels.
 -- input = "Do or do not, there is no try."
@@ -3045,6 +3043,7 @@ deck =
 -- [20,20,20,10,30,50,40,3,30,40,40,50]
 
 -- |
+
 --- List all cards which have ANY move with an attack power greater than 40.
 -- >>> deck ^.. folded . filtered (anyOf (moves . folded . movePower) (> 40)) . cardName
 -- ["Elecdude","Sparkeon"]
@@ -3090,7 +3089,7 @@ deck =
 -- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
 
 ---------------------------
--- Exercises – Filtering --
+-- Exercises - Filtering --
 ---------------------------
 
 -- Use a fold to answer each of the questions about my card collection:
@@ -3150,11 +3149,19 @@ deck =
 --                                       Traversals                                       --
 --------------------------------------------------------------------------------------------
 
+--------------------------------
+-- Introduction to Traversals --
+--------------------------------
+
+-- Traversals are essentially what you get if you combine all the powers of folds and lenses together.
+-- Lenses can get and set only a single value, whereas folds can get multiple values, but can't set or update.
+-- Traversals are the fusion of the two and allow us to get or set zero or more values.
+
 -----------------------------------------------
 -- How do Traversals Fit into the Hierarchy? --
 -----------------------------------------------
 
---            | Get    | Set/Modify | Traverse
+--            |  Get   | Set/Modify | Traverse
 -----------------------------------------------
 -- Lens       | Single |   Single   | Single
 -- Fold       |  Many  |     ✗      |   ✗
@@ -3170,33 +3177,43 @@ deck =
 -- Fold           |  ✗   |  ✓   |    ✗
 -- Traversal      |  ✗   |  ✓   |    ✓
 
+-- When working with traversals rather than lenses we can no longer guarantee that our optic must have a focus.
+-- Meaning we need to use the more conservative viewing actions (^?) or (^..) rather than (^.).
+-- In general we need to be more careful using a traversal because it may fail.
+
+------------------------
+-- A Bit of Nostalgia --
+------------------------
+
 ----------------------------
 -- From Fold to Traversal --
 ----------------------------
 
 -- |
--- we can use the traversal as a fold
+-- `both` is actually a Traversal.
+-- But can be used as a Fold.
+-- We just view the focuses. No sets or updates.
 -- >>> ("Bubbles", "Buttercup") ^.. both
 -- ["Bubbles","Buttercup"]
 
 -- |
--- modify the focuses using the over action: (%∼)
+-- Modify the focuses using the `over` action: (%∼).
 -- >>> ("Bubbles", "Buttercup") & both %~ (++ "!")
 -- ("Bubbles!","Buttercup!")
 
 -- |
--- using set (.∼) on a traversal
+-- Using `set` (.∼) on a Traversal.
 -- >>> ("Bubbles", "Buttercup") & both .~ "Blossom"
 -- ("Blossom","Blossom")
 
 -- |
--- changing type of tuple (polymorphic traversal)
+-- Changing type of tuple (polymorphic Traversal).
 -- >>> ("Bubbles", "Buttercup") & both %~ length
 -- (7,9)
 
 -- |
--- each is also a traversal
--- >>> (1, 2, 3) & each %~ (*10)
+-- `each` is also a Traversal.
+-- >>> (1, 2, 3) & each %~ (* 10)
 -- (10,20,30)
 
 -- |
@@ -3204,7 +3221,8 @@ deck =
 -- "HERE'S JOHNNY"
 
 -- |
--- you can't change what Text is made of
+-- You can't change what Text is made of.
+-- A Text block must be made up of Chars, we can't just change them to Ints and expect it to work.
 -- ("Houston we have a problem" ∷ Text) & each .~ (22 ∷ Int)
 -- Couldn't match expected type ‘Text’ with actual type ‘[Char]’
 -- Couldn't match type ‘Int’ with ‘Char’ arising from a use of ‘each’
@@ -3222,13 +3240,13 @@ deck =
 -- "ONCE UPON A TIME - optics became mainstream"
 
 -- |
--- Multiply all even numbers by 10
+-- Multiply all even numbers by 10.
 -- >>> [1, 2, 3, 4, 5] & traversed . filtered even *~ 10
 -- [1,20,3,40,5]
 
 -- |
 -- `filtered` is an extremely powerful tool, it alters the exact same elements which would be focused when you use it in a fold.
--- Reverse only the long strings
+-- Reverse only the long strings.
 -- >>> ("short", "really long") & both . filtered ((> 5) . length) %~ reverse
 -- ("short","gnol yllaer")
 
@@ -3241,7 +3259,7 @@ deck =
 --------------------------------------------
 
 -- |
--- cannot modify a fold
+-- Cannot modify a Fold.
 -- [1, 2, 3] & folded %~ (*10)
 -- Could not deduce (Contravariant Identity)
 --   arising from a use of ‘folded’
@@ -3249,20 +3267,29 @@ deck =
 -- `folded` can be used on more container types (like `Set`), but `traversed` has strictly more power (it can set and update).
 
 -- |
+-- Lists are traversable.
 -- >>> [1, 2, 3] & traversed *~ 10
 -- [10,20,30]
 
 -- |
--- Tuples are traversable over their last slot
+-- Tuples are traversable (over their last slot).
 -- >>> ("Batman", "Superman") & traversed %~ take 3
 -- ("Batman","Sup")
 
 -- |
+-- Maps are traversable.
 -- >>> let powerLevels = M.fromList [("Gohan", 710) , ("Goku", 9001) , ("Krillin", 5000) , ("Piccolo", 408)]
 -- >>> powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
 -- fromList [("Gohan","710"),("Goku","Over 9000"),("Krillin","5000"),("Piccolo","408")]
 
 -- |
+-- Sets are NOT traversable.
+-- let powerLevels = S.fromList [("Gohan", 710) , ("Goku", 9001) , ("Krillin", 5000) , ("Piccolo", 408)]
+-- powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
+-- No instance for (Traversable Set) arising from a use of ‘traversed’
+
+-- |
+-- Trees are traversable.
 -- >>> let opticsTree = Node "Lens" [Node "Fold" [], Node "Traversal" []]
 -- >>> opticsTree & traversed %~ reverse
 -- Node {rootLabel = "sneL", subForest = [Node {rootLabel = "dloF", subForest = []},Node {rootLabel = "lasrevarT", subForest = []}]}
@@ -3272,35 +3299,35 @@ deck =
 ----------------------
 
 -- |
--- as folds `worded` works pretty much the same as `words`
+-- As Folds `worded` works pretty much the same as `words` from the Prelude.
 -- >>> "I'll be back!" ^.. worded
 -- ["I'll","be","back!"]
 
 -- |
--- the same for lined
+-- The same for `lined`.
 -- >>> "Run\nForrest\nRun" ^.. lined
 -- ["Run","Forrest","Run"]
 
 -- |
--- as traversal we can also update
--- Surround each word with '*'s
--- result is a String
+-- As Traversal we can also update.
+-- Surround each word with '*'s.
+-- Result is a String.
 -- >>> "blue suede shoes" & worded %~ \s → "*" ++ s ++ "*"
 -- "*blue* *suede* *shoes*"
 
 -- |
--- Capitalize each word
+-- Capitalize each word.
 -- >>> "blue suede shoes" & worded %~ \(x:xs) → toUpper x : xs
 -- "Blue Suede Shoes"
 
 -- |
--- Add a "#" to the start of each line:
+-- Add a "#" to the start of each line.
 -- >>> "blue\nsuede\nshoes" & lined %~ ('#':)
 -- "#blue\n#suede\n#shoes"
 
 -- |
 -- Mapping the identity function still has the white-space collapsing side-effects of `unwords`.
--- newlines are getting lost
+-- Newlines are getting lost.
 -- >>> "blue \n suede \n \n shoes" & worded %~ id
 -- "blue suede shoes"
 
@@ -3308,7 +3335,17 @@ deck =
 -- Traversing Multiple Paths at Once --
 ---------------------------------------
 
+-- Two signature examples for `beside` using tuples.
+-- beside ∷ Lens s t a b → Lens s' t' a b → Traversal (s,s') (t,t') a b
+-- beside ∷ Fold s a     → Fold s' a      → Fold (s,s') a
+
+-- But will work for every Bitraversable - not only tuples - as we will see.
+
+-- `beside` is a higher-order optic.
+-- It takes two Optics as arguments and returns a new Optic as a result.
+
 -- |
+-- Note: `id` is a valid Optic.
 -- >>> let dinos = ("T-Rex", (42, "Stegosaurus"))
 -- >>> dinos ^.. beside id _2
 -- ["T-Rex","Stegosaurus"]
@@ -3324,13 +3361,13 @@ deck =
 -- ["T-Rex","Ankylosaurus","Stegosaurus"]
 
 -- |
--- We can modify all characters inside both halves of the tuple
--- Each half of the tuple has a different path to focus the characters
+-- We can modify all characters inside both halves of the tuple.
+-- Each half of the tuple has a different path to focus the characters.
 -- >>> ("Cowabunga", ["let's", "order", "pizza"]) & beside traversed (traversed . traversed) %~ toUpper
 -- ("COWABUNGA",["LET'S","ORDER","PIZZA"])
 
 -- |
--- Every `Bitraversable` can be used with `beside`.
+-- Every `Bitraversable` - not only tuples - can be used with `beside`!!!
 -- >>> Left (1, 2) & beside both traversed %~ negate
 -- Left (-1,-2)
 
@@ -3342,15 +3379,23 @@ deck =
 -- Focusing a Specific Traversal Element --
 -------------------------------------------
 
+-- `element` is simple traversal which will focuses only the nth element of a Traversable container.
+-- Because it doesn't focus every element of the container it's a Monomorphic Traversal.
+-- element ∷ Traversable f ⇒ Int → Traversal' (f a) a
+
 -- |
 -- >>> [0, 1, 2, 3, 4] ^? element 2
 -- Just 2
 
 -- |
 -- `element` can't change the container's element type.
--- This is called a `monomorphic traversal`.
+-- It is a `Monomorphic Traversal` after all.
 -- >>> [0, 1, 2, 3, 4] & element 2 *~ 100
 -- [0,1,200,3,4]
+
+-- `elementOf` is a higher-order traversal which allows to select a specific element from an arbitrary traversal.
+-- elementOf ∷ Traversal' s a → Int → Traversal' s a
+-- elementOf ∷ Fold s a       → Int → Fold s a
 
 -- |
 -- `element` is basically `elementOf traversed`
@@ -3358,7 +3403,7 @@ deck =
 -- Just 2
 
 -- |
--- We can get a specific element from a composition of traversals
+-- We can get a specific element from a composition of traversals.
 -- >>> [[0, 1, 2], [3, 4], [5, 6, 7, 8]] ^? elementOf (traversed . traversed) 6
 -- Just 6
 
@@ -3370,20 +3415,111 @@ deck =
 -- Traversal Composition --
 ---------------------------
 
+-- Each traversal selects focuses, then rebuilds the structure around the transformed results!!!
+
 -- |
 -- Capitalize the first char of every word.
 -- >>> "blue suede shoes" & worded . taking 1 traversed %~ toUpper
 -- "Blue Suede Shoes"
 
 -- |
--- Find all strings longer than 5 chars then surround each word in that string with '*'
+-- Find all strings longer than 5 chars then surround each word in that string with '*'.
 -- >>> ["short", "really long"] & traversed . filtered ((> 5) . length) . worded %~ \s → "*" ++ s ++ "*"
 -- ["short","*really* *long*"]
 
 -- |
--- Add "Rich " to the names of people with more than $1000.
--- >>> (("Ritchie", 100000), ("Archie", 32), ("Reggie", 4350)) & each . filtered ((> 1000) . snd) . _1 %~ ("Rich " ++)
--- (("Rich Ritchie",100000),("Archie",32),("Rich Reggie",4350))
+-- Add "Richy " to the names of people with more than $1000.
+-- >>> (("Ritchie", 100000), ("Archie", 32), ("Reggie", 4350)) & each . filtered ((> 1000) . snd) . _1 %~ ("Richy " ++)
+-- (("Richy Ritchie",100000),("Archie",32),("Richy Reggie",4350))
+
+-----------------------------------
+-- Exercises - Simple Traversals --
+-----------------------------------
+
+-- 1. Short answer questions:
+
+-- What type of optic do you get when you compose a Traversal with a Fold?
+-- A Fold.
+
+-- Which of the optics we've learned can act as a Traversal?
+-- Lens, Traversal.
+
+-- Which of the optics we've learned can act as a Fold?
+-- Lens, Fold, Traversal.
+
+-- 2. Fill in the blank to complete each expression:
+
+-- >>> ("Jurassic", "Park") & _ .~ "N/A"
+-- ("N/A", "N/A")
+
+-- >>> ("Jurassic", "Park") & both . _ .~ 'x'
+-- ("xxxxxxxx", "xxxx")
+
+-- >>> ("Malcolm", ["Kaylee", "Inara", "Jayne"]) & _ id traversed %~ take 3
+-- ("Mal", ["Kay", "Ina", "Jay"])
+
+-- >>> ("Malcolm", ["Kaylee", "Inara", "Jayne"]) & _2 . _ 1 .~ "River"
+-- ("Malcolm", ["Kaylee", "River", "Jayne"])
+
+-- This one's tricky!
+-- >>> ["Die Another Day", "Live and Let Die", "You Only Live Twice"] & traversed . _ _ 1 . traversed .~ 'x'
+-- [ "Die xxxxxxx Day"
+-- , "Live xxx Let Die"
+-- , "You xxxx Live Twice"
+-- ]
+
+-- A bit tougher now!
+-- >>> ((1, 2), (3, 4)) & _ +~ 1
+-- ((2, 3), (4, 5))
+
+-- >>> (1, (2, [3, 4])) & _ +~ 1
+-- (2, (3, [4, 5]))
+
+-- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & _ %~ toUpper
+-- ((True, "STRAWberries"), (False, "Blueberries"), (True, "BLACKberries"))
+
+-- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & _
+-- ("Strawberries", "Blueberries", "Blackberries")
+
+-- Solutions:
+
+-- |
+-- >>> ("Jurassic", "Park") & both .~ "N/A"
+-- ("N/A","N/A")
+
+-- |
+-- >>> ("Jurassic", "Park") & both . each .~ 'x'
+-- ("xxxxxxxx","xxxx")
+
+-- |
+-- >>> ("Malcolm", ["Kaylee", "Inara", "Jayne"]) & beside id traversed %~ take 3
+-- ("Mal",["Kay","Ina","Jay"])
+
+-- |
+-- >>> ("Malcolm", ["Kaylee", "Inara", "Jayne"]) & _2 . element 1 .~ "River"
+-- ("Malcolm",["Kaylee","River","Jayne"])
+
+-- |
+-- This one's tricky!
+-- >>> ["Die Another Day", "Live and Let Die", "You Only Live Twice"] & traversed . elementOf worded 1 . traversed .~ 'x'
+-- ["Die xxxxxxx Day","Live xxx Let Die","You xxxx Live Twice"]
+
+-- |
+-- A bit tougher now!
+-- >>> ((1, 2), (3, 4)) & both . both +~ 1
+-- ((2,3),(4,5))
+
+-- |
+-- >>> (1, (2, [3, 4])) & beside id (beside id traverse) +~ 1
+-- (2,(3,[4,5]))
+
+-- |
+-- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & each . filteredBy (_1 . only True) . _2 . taking 5 traversed %~ toUpper
+-- ((True,"STRAWberries"),(False,"Blueberries"),(True,"BLACKberries"))
+
+-- |
+-- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & each %~ snd
+-- ("Strawberries","Blueberries","Blackberries")
 
 -----------------------
 -- Traversal Actions --
@@ -3392,6 +3528,15 @@ deck =
 -----------------------------
 -- A Primer on Traversable --
 -----------------------------
+
+-- sequenceA ∷ (Traversable t, Applicative f) ⇒ t (f a) → f (t a)
+
+-- `sequenceA` is flip-flopping its types:
+-- [Maybe a] → Maybe [a]
+-- Maybe [a] → [Maybe a]
+-- Either e (IO a) → IO (Either e a)
+-- [IO a] → IO [a]
+-- Map k (State s a) → State s (Map k a)
 
 -- |
 -- >>> sequenceA [Just 1, Just 2, Just 3]
@@ -3402,14 +3547,24 @@ deck =
 -- Nothing
 
 -- |
+-- sequenceA ∷ Maybe (Either String a) → Either String (Maybe a)
 -- >>> sequenceA $ Just (Left "Whoops")
 -- Left "Whoops"
 
 -- :t readMaybe
 -- readMaybe ∷ Read a ⇒ String → Maybe a
--- 'readMaybe' is polymorphic so we need to specify a concrete result type
+-- 'readMaybe' is polymorphic so we need to specify a concrete result type.
+
+-- traverse ∷ (Traversable t, Applicative f) ⇒ (a → f b) → t a → f (t b)
+
+-- The Traversable is '[ ]', and the effect is 'IO'
+-- (FilePath → IO String) → [FilePath] → IO [String]
+
+-- The Traversable is '[ ]', and the effect is 'Maybe'
+-- (String → Maybe Int) → [String] → Maybe [Int]
 
 -- |
+-- readMaybe ∷ Read a ⇒ String → Maybe a
 -- >>> import Text.Read (readMaybe)
 -- >>> traverse readMaybe ["1", "2", "3"] ∷ Maybe [Int]
 -- Just [1,2,3]
@@ -3419,7 +3574,11 @@ deck =
 -- >>> traverse readMaybe ["1", "snark", "3"] ∷ Maybe [Int]
 -- Nothing
 
+-- The Traversable is '((,) String)', and the effect is '[ ]'
+-- (Int → [Int]) → (String, Int) → [(String, Int)]
+
 -- |
+-- traverse ∷ (Integer → [Integer]) → ([Char], Integer) → [([Char], Integer)]
 -- >>> traverse (\n → [n * 10, n * 100]) ("a", 10)
 -- [("a",100),("a",1000)]
 
@@ -3459,7 +3618,7 @@ validateEmail email
 -- >>> traverseOf (traversed . _2) validateEmail [ ("Mike", "mike@tmnt.io") , ("Raph", "raph.io") , ("Don", "don@tmnt.io") , ("Leo", "leo@tmnt.io") ]
 -- Left "missing '@': raph.io"
 
--- simple validation
+-- We want to collect all the errors.
 validateEmail' ∷ String → Validation [String] String
 validateEmail' email
   | '@' `elem` email = Success email
@@ -3473,7 +3632,14 @@ validateEmail' email
 -- >>> traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph.io"], ["don@tmnt.io", "leo.io"])
 -- Failure ["missing '@': raph.io","missing '@': leo.io"]
 
+-- `forOf` is the arguments-flipped version of `traverseOf`.
+-- forOf ∷ Traversal s t a b → s → (a → f b) → f t
+
+-- We can use `sequenceAOf` to pull effects deep inside our structures to the outside.
+-- sequenceAOf ∷ Traversal s t (f a) a → s → f t
+
 -- |
+-- Pull out `Just`.
 -- >>> sequenceAOf _1 (Just "Garfield", "Lasagna")
 -- Just ("Garfield","Lasagna")
 
@@ -3482,6 +3648,7 @@ validateEmail' email
 -- Nothing
 
 -- |
+-- Pull out `Just`.
 -- >>> sequenceAOf (both . traversed) ([Just "apples"], [Just "oranges"])
 -- Just (["apples"],["oranges"])
 
@@ -3518,6 +3685,87 @@ validateEmail' email
 -- I'd recommend avoiding this style; it's unnecessarily confusing, unidiomatic, and doesn't translate well to other optics libraries, but it's sometimes useful to know that it exists.
 -- The combinators help a lot with readability, so I'd recommend you use them consistently.
 
+-----------------------------------
+-- Exercises - Traversal Actions --
+-----------------------------------
+
+-- 1. Fill in the blanks! You know the drill.
+
+-- |
+--               _ _1 (Nothing, "Rosebud")
+-- >>> sequenceAOf _1 (Nothing, "Rosebud")
+-- Nothing
+
+-- |
+--     sequenceAOf (traversed . _1) _
+-- >>> sequenceAOf (traversed . _1) [("ab", 1), ("cd", 2)]
+-- [[('a',1),('c',2)],[('a',1),('d',2)],[('b',1),('c',2)],[('b',1),('d',2)]]
+
+-- |
+-- The ZipList effect groups elements by position in the list.
+--     sequenceAOf _         [ZipList [1, 2], ZipList [3, 4]]
+-- >>> sequenceAOf traversed [ZipList [1, 2], ZipList [3, 4]]
+-- ZipList {getZipList = [[1,3],[2,4]]}
+
+-- |
+--     sequenceAOf (traversed . _2) [('a', ZipList  _),     ('b', ZipList  _)]
+-- >>> sequenceAOf (traversed . _2) [('a', ZipList [1, 2]), ('b', ZipList [3, 4])]
+-- ZipList {getZipList = [[('a',1),('b',3)],[('a',2),('b',4)]]}
+
+-- |
+--     let result = traverseOf _                       (\n → modify (+ n) >> get) ([1, 1, 1], (1, 1))
+-- >>> let result = traverseOf (beside traversed both) (\n → modify (+ n) >> get) ([1, 1, 1], (1, 1))
+-- >>> evalState result 0
+-- ([1,2,3],(4,5))
+
+-- 2. Rewrite the following using the infix-operator for traverseOf!
+
+-- |
+-- traverseOf (_1 . traversed) (\c → [toLower c, toUpper c]) ("ab", True)
+-- >>> ("ab", True) & _1 . traversed %%~ (\c → [toLower c, toUpper c])
+-- [("ab",True),("aB",True),("Ab",True),("AB",True)]
+
+-- |
+-- traverseOf (traversed . _1) (\c → [toLower c, toUpper c]) [('a', True), ('b', False)]
+-- >>> [('a', True), ('b', False)] & traversed . _1 %%~ (\c → [toLower c, toUpper c])
+-- [[('a',True),('b',False)],[('a',True),('B',False)],[('A',True),('b',False)],[('A',True),('B',False)]]
+
+-- 3. Given the following data definitions, write a validation function which uses `traverseOf` or `%%∼`
+--    to validate that the given user has an age value above zero and below 150. Return an appropriate
+--    error message if it fails validation.
+
+data AUser = AUser
+  { _aname ∷ String,
+    _age ∷ Int
+  }
+  deriving (Show)
+
+makeLenses ''AUser
+
+data Account = Account
+  { _accId ∷ String,
+    _user ∷ AUser
+  }
+  deriving (Show)
+
+makeLenses ''Account
+
+validateAge ∷ Account → Either String Account
+validateAge = traverseOf (user . age) check
+  where
+    check accAge
+      | accAge < 0 = Left "Way too young!"
+      | accAge > 150 = Left "Way too old!"
+      | otherwise = Right accAge
+
+-- validateAge ∷ Account → Either String Account
+-- validateAge account
+--   | accAge < 0 = Left "Way too young!"
+--   | accAge > 150 = Left "Way too old!"
+--   | otherwise = Right account
+--   where
+--     accAge = account ^. user . age
+
 -----------------------
 -- Custom traversals --
 -----------------------
@@ -3526,22 +3774,28 @@ validateEmail' email
 -- Optics Look like `traverse` --
 ---------------------------------
 
+-- type Lens s t a b      = ∀ f. Functor f                        ⇒ (a → f b) → (s → f t)
+-- type Traversal s t a b = ∀ f. Applicative f                    ⇒ (a → f b) → (s → f t)
+-- type Fold s a          = ∀ f. (Contravariant f, Applicative f) ⇒ (a → f a) → (s → f s)
+
 -- The symmetry we see in these shapes is why we can compose optics of differing types together.
--- Every optic is actually the exact same type plus or minus constraints on <f>!
--- As optics are composed, the constraints on <f> are gathered up.
+-- Every optic is actually the exact same type plus or minus constraints on `f`!
+-- As optics are composed, the constraints on `f` are gathered up.
 
 --------------------------------
 -- Our First Custom Traversal --
 --------------------------------
 
--- Van Laarhoven optics are just a function which matches a ‘traverse-like’ signature we can write our own traversals by hand.
+-- Van Laarhoven optics are just a function which matches a ‘traverse-like’ signature.
+-- We can write our own traversals by hand.
 
--- Author recommends fully expanding the type signature.
+-- Simplified version of traversed which works only on lists.
+-- Call the `handler` for things you want to focus on!
+-- The `handler` focuses elements!
 values ∷ Applicative f ⇒ (a → f b) → [a] → f [b]
 values _ [] = pure []
-values handler (a : as) = (:) <$> handler a <*> values handler as
-
 -- values handler (a : as) = liftA2 (:) (handler a) (values handler as)
+values handler (a : as) = (:) <$> handler a <*> values handler as
 
 -- |
 -- >>> ["one", "two", "three"] ^.. values
@@ -3552,7 +3806,7 @@ values handler (a : as) = (:) <$> handler a <*> values handler as
 -- ["eno","owt","eerht"]
 
 -- |
--- We should be able to do type-changing transformations too:
+-- type-changing transformation
 -- >>> ["one", "two", "three"] & values %~ length
 -- [3,3,5]
 
@@ -3565,6 +3819,13 @@ data Transaction
   | Deposit {_moneyAmount ∷ Int}
   deriving (Show)
 
+-- Note that it's normally bad-style to have field names on types with multiple constructors.
+-- But it's okay so long as all constructors have the EXACT same field names and types like they do here.
+
+-- This will be generated by makeLenses for `moneyAmount`.
+-- For `moneyAmount` it doesn't matter if it deals with a Withdrawal or a Deposit.
+-- moneyAmount ∷ Lens' Transaction Int
+
 makeLenses ''Transaction
 
 newtype BankAccount = BankAccount
@@ -3572,16 +3833,20 @@ newtype BankAccount = BankAccount
   }
   deriving (Show)
 
+-- This will be generated by `makeLenses`.
+-- transactions ∷ Lens' BankAccount [Transaction]
+
 makeLenses ''BankAccount
 
 -- |
--- Get all transactions
+-- Get all transactions.
 -- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
 -- >>> aliceAccount ^.. transactions . traversed
 -- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Withdrawal {_moneyAmount = 10}]
 
 -- |
--- Get the amounts for all transactions
+-- Get the amounts for all transactions.
+-- `moneyAmount` targets both Withdrawals and Deposits.
 -- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
 -- >>> aliceAccount ^.. transactions . traversed . moneyAmount
 -- [100,20,10]
@@ -3590,7 +3855,13 @@ makeLenses ''BankAccount
 -- Case Study: Transaction Traversal --
 ---------------------------------------
 
--- The handler focuses elements, pure ignores them.
+-- deposits ∷ Traversal' [Transaction] Int ------------------------------------- This is what we want.
+-- deposits ∷ Traversal [Transaction] [Transaction] Int Int -------------------- Expand to the simple Traversal.
+-- deposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction] -- Expand into the 'traverse'-like function.
+
+-- The handler is for determining the focus.
+-- Call the handler means focus on this value.
+-- Not calling the handler means do not focus on this value.
 deposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction]
 deposits _ [] = pure []
 deposits handler (Withdrawal amt : rest) = (Withdrawal amt :) <$> deposits handler rest
@@ -3606,9 +3877,8 @@ deposits handler (Deposit amt : rest) = liftA2 (:) (Deposit <$> handler amt) (de
 -- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits *~ 10
 -- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
 
--- WARNING, when focusing a subset of a list like this our first thought is often to look at using a helper
--- like filter to implement the traversal; but you need to be careful! filter is a destructive operation,
--- it throws away any parts of the list which don't match.
+-- WARNING: When focusing a subset of a list like this our first thought is often to look at using a helper like `filter t`o implement the Traversal.
+-- But you need to be careful! `filter` is a destructive operation, it throws away any parts of the list which don't match.
 
 isDeposit ∷ Transaction → Bool
 isDeposit (Deposit _) = True
@@ -3640,6 +3910,63 @@ deposits' = traversed . filtered isDeposit . moneyAmount
 -- |
 -- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits' *~ 10
 -- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
+
+-----------------------------------
+-- Exercises - Custom Traversals --
+-----------------------------------
+
+-- 1. Rewrite the amount transaction lens manually as the following Traversal:
+
+-- amountT ∷ Traversal' Transaction Int
+
+-- 2. Reimplement the both traversal over tuples:
+
+-- both ∷ Traversal (a, a) (b, b) a b
+
+-- 3. Write the following custom Traversal:
+
+-- transactionDelta ∷ Traversal' Transaction Int
+
+-- It should focus the amount of the transaction, but should reflect the change that the transaction
+-- causes to the balance of the account. That is, Deposits should be a positive number, but Withdrawals
+-- should be negative. The Traversal should not change the underlying representation of the data.
+
+-- Here’s how it should behave:
+
+-- >>> Deposit 10 ^? transactionDelta
+
+-- Just 10
+
+-- Withdrawal's delta is negative
+-- >>> Withdrawal 10 ^? transactionDelta
+
+-- Just (-10)
+
+-- >>> Deposit 10 & transactionDelta .~ 15
+
+-- Deposit {_amount = 15}
+
+-- >>> Withdrawal 10 & transactionDelta .~ (-15)
+
+-- Withdrawal {_amount = 15}
+
+-- >>> Deposit 10 & transactionDelta +~ 5
+
+-- Deposit {_amount = 15}
+
+-- >>> Withdrawal 10 & transactionDelta +~ 5
+
+-- Withdrawal {_amount = 5}
+
+-- 4. Implement left:
+
+-- left ∷ Traversal (Either a b) (Either a' b) a a'
+
+-- 5. BONUS: Reimplement the beside traversal:
+
+-- beside ∷ Traversal s t a b → Traversal s' t' a b → Traversal (s,s') (t,t') a b
+
+-- Hint: You can use traverseOf or %%∼ to help simplify your implementation!
 
 --------------------
 -- Traversal Laws --
