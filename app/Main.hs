@@ -3918,53 +3918,65 @@ deposits' = traversed . filtered isDeposit . moneyAmount
 -- 1. Rewrite the amount transaction lens manually as the following Traversal:
 
 -- amountT ∷ Traversal' Transaction Int
+amountT ∷ Applicative f ⇒ (Int → f Int) → Transaction → f Transaction
+amountT handler (Withdrawal amt) = Withdrawal <$> handler amt
+amountT handler (Deposit amt) = Deposit <$> handler amt
 
--- 2. Reimplement the both traversal over tuples:
+-- 2. Reimplement the `both traversal` over tuples:
 
 -- both ∷ Traversal (a, a) (b, b) a b
+both' ∷ Applicative f ⇒ (a → f b) → (a, a) → f (b, b)
+both' handler (a1, a2) = (,) <$> handler a1 <*> handler a2
 
 -- 3. Write the following custom Traversal:
 
 -- transactionDelta ∷ Traversal' Transaction Int
+transactionDelta ∷ Functor f ⇒ (Int → f Int) → Transaction → f Transaction
+transactionDelta handler (Withdrawal amt) = Withdrawal . negate <$> handler (negate amt)
+transactionDelta handler (Deposit amt) = Deposit <$> handler amt
 
 -- It should focus the amount of the transaction, but should reflect the change that the transaction
 -- causes to the balance of the account. That is, Deposits should be a positive number, but Withdrawals
 -- should be negative. The Traversal should not change the underlying representation of the data.
 
--- Here’s how it should behave:
+-- Here's how it should behave:
 
+-- |
 -- >>> Deposit 10 ^? transactionDelta
-
 -- Just 10
 
+-- |
 -- Withdrawal's delta is negative
 -- >>> Withdrawal 10 ^? transactionDelta
-
 -- Just (-10)
 
+-- |
 -- >>> Deposit 10 & transactionDelta .~ 15
+-- Deposit {_moneyAmount = 15}
 
--- Deposit {_amount = 15}
-
+-- |
 -- >>> Withdrawal 10 & transactionDelta .~ (-15)
+-- Withdrawal {_moneyAmount = 15}
 
--- Withdrawal {_amount = 15}
-
+-- |
 -- >>> Deposit 10 & transactionDelta +~ 5
+-- Deposit {_moneyAmount = 15}
 
--- Deposit {_amount = 15}
-
+-- |
 -- >>> Withdrawal 10 & transactionDelta +~ 5
-
--- Withdrawal {_amount = 5}
+-- Withdrawal {_moneyAmount = 5}
 
 -- 4. Implement left:
 
 -- left ∷ Traversal (Either a b) (Either a' b) a a'
+left ∷ Applicative f ⇒ (a → f a') → Either a b → f (Either a' b)
+left handler (Left x) = Left <$> handler x
+left handler (Right x) = pure (Right x)
 
 -- 5. BONUS: Reimplement the beside traversal:
 
--- beside ∷ Traversal s t a b → Traversal s' t' a b → Traversal (s,s') (t,t') a b
+beside' ∷ Traversal s t a b → Traversal s' t' a b → Traversal (s,s') (t,t') a b
+beside' left right handler (s, s') = (,) <$> (s & left %%~ handler) <*> (s' & right %%~ handler)
 
 -- Hint: You can use traverseOf or %%∼ to help simplify your implementation!
 
@@ -3976,6 +3988,9 @@ deposits' = traversed . filtered isDeposit . moneyAmount
 -- Law One: Respect Purity --
 -----------------------------
 
+-- Running the traversal with an "empty" (`pure`) handler shouldn't change anything.
+-- traverseOf myTraversal pure x == pure x
+
 -- |
 -- When we run a traversal, we expect it to run our handler on the focused elements, then thread the effects through to the outside, but do nothing else!
 -- >>> (traverseOf both pure ("don't", "touch") ∷ [(String, String)]) == (pure ("don't", "touch") ∷ [(String, String)])
@@ -3984,10 +3999,13 @@ deposits' = traversed . filtered isDeposit . moneyAmount
 -- |
 -- >>> (traverseOf both pure ("don't", "touch") ∷ Maybe (String, String)) == (pure ("don't", "touch") ∷ Maybe (String, String))
 -- True
+
+-- This traversal is not lawful.
 badTupleSnd ∷ Traversal (Int, a) (Int, b) a b
 badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 
--- The idea is that traversals shouldn't be messing around where they don't belong. Let the handlers do the updating and don't mess with state yourself!
+-- The idea is that traversals shouldn't be messing around where they don't belong.
+-- Let the handlers do the updating and don't mess with state yourself!
 
 -- |
 -- >>> traverseOf badTupleSnd pure (10, "Yo")
@@ -4001,27 +4019,73 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- Law Two: Consistent Focuses --
 ---------------------------------
 
--- x & myTraversal %~ f
---   & myTraversal %~ g
--- ==
--- x & myTraversal %~ (g . f)
+-- x & myTraversal %~ f & myTraversal %~ g == x & myTraversal %~ (g . f)
 
--- In essence this law states that the traversal should never change which elements it focuses due to alterations on those elements.
--- `both` is a law-abiding traversal, so we expect to see the equality hold for any structure or handlers we can dream up:
+-- The traversal should never change which elements it focuses due to alterations on those elements.
 
 -- |
--- >>> ((0, 0) & both %~ (+10) & both %~ (*10)) == ((0, 0) & both %~ (*10) . (+10))
+-- `both` is a law-abiding traversal, so we expect to see the equality hold for any structure or handlers we can dream up.
+-- >>> ((0, 0) & both %~ (+ 10) & both %~ (* 10)) == ((0, 0) & both %~ (* 10) . (+ 10))
 -- True
 
 -- |
--- `filtered` is a law-breaking traversal.
--- >>> (2 & filtered even %~ (+1) & filtered even %~ (*10)) == (2 & filtered even %~ (*10) . (+1))
+-- `filtered` is a law-breaking traversal. Updates can change which elements are in focus!
+-- >>> (2 & filtered even %~ (+ 1) & filtered even %~ (* 10)) == (2 & filtered even %~ (* 10) . (+ 1))
 -- False
 
+-- |
+-- >>> 2 & filtered even %~ (+ 1) & filtered even %~ (* 10)
+-- 3
+
+-- |
+-- `filtered` is a law-breaking traversal.
+-- >>> 2 & filtered even %~ (* 10) . (+ 1)
+-- 30
+
+----------------------------------
 -- Good Traversal Bad Traversal --
+----------------------------------
 
 -- Why is there a traversal included in the lens library that blatantly breaks one of the laws?
--- As it turns out, the traversal laws are more guidelines than anything.
+-- The traversal laws are more guidelines than anything.
+
+-- Some traversals like `filtered` are very useful but can't be encoded in a legal way in Haskell.
+
+--------------------------------
+-- Exercises - Traversal Laws --
+--------------------------------
+
+-- 1. `worded` is a law-breaking traversal! Determine which law it breaks and give an example which shows that it doesn't pass the law.
+
+-- Passes 1st law.
+
+-- |
+-- >>> traverseOf worded pure "Hello again my friend"
+-- "Hello again my friend"
+
+-- |
+-- >>> pure "Hello again my friend"
+-- "Hello again my friend"
+
+-- |
+-- Adding a space to the string during an update creates new focuses for the worded traversal!
+-- >>> ("one two" & worded %~ (<> " missisipi") & worded %~ reverse) == ("one two" & worded %~ reverse . (<> " missisipi"))
+-- False
+
+-- 2. Write a custom traversal which breaks the first law. Be as creative as you like!
+-- NA
+
+-- 3. Write a custom traversal which breaks the second law. Be as creative as you like!
+-- NA
+
+-- 4. For each of the following traversals, decide which you think is lawful.
+--    If they're unlawful come up with a counter-example for one of the laws.
+
+-- taking: ✓
+-- beside: ✓
+-- each: ✓
+-- lined: ✗ (Adding a newline creates new focuses for the next lined traversal.)
+-- traversed: ✓
 
 ---------------------------
 -- Advanced Manipulation --
@@ -4030,9 +4094,16 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- partsOf ∷ Traversal' s a → Lens' s [a]
 
 -- The lens generated by partsOf takes all the focuses of the provided traversal and packs them into a
--- list for you to manipulate however you like. Then, it takes the modified list and maps each element
--- back into the original structure!!!
--- We're welcome to use ANY list manipulation functions we want!
+-- list to be manipulated. Then, it takes the modified list and maps each element back into the original structure!
+
+-- Rules regarding replacement:
+-- If the list has more elements than the traversal, the extras will be ignored.
+-- If the list has fewer elements than the traversal, unmatched portions of the traversal will be unaffected.
+
+-- It's because of these rules that `partsOf` isn't a polymorphic lens.
+-- We might need to re-use some of the original elements so we can't change their type!
+
+-- Get
 
 -- |
 -- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _1)
@@ -4041,6 +4112,8 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- |
 -- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _2)
 -- [1,2,3]
+
+-- set
 
 -- |
 -- We can `set` the lens to a list to replace the corresponding elements
@@ -4056,6 +4129,8 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- Providing too few elements will keep the originals
 -- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['x']
 -- [('x',1),('b',2),('c',3)]
+
+-- Modify (over)
 
 -- |
 -- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) %~ reverse
@@ -4123,6 +4198,9 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- Polymorphic partsOf --
 -------------------------
 
+-- We can change the type of the focus but we if set or modify with the wrong number of list elements it'll crash.
+-- unsafePartsOf ∷ Traversal s t a b → Lens s t [a] [b]
+
 -- |
 -- [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False]
 -- unsafePartsOf': not enough elements were supplied
@@ -4135,40 +4213,92 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) %~ \xs → zipWith (,) xs ((Just <$> tail xs) ++ [Nothing])
 -- [(('a',Just 'b'),1),(('b',Just 'c'),2),(('c',Nothing),3)]
 
+-------------------------
+-- Exercises - partsOf --
+-------------------------
+
+-- What fits in the blanks? (Sometimes blanks are missing. Just ignore. Exercise is a bit chaotic.)
+
+-- |
+-- Viewing
+-- >>> [1, 2, 3, 4] ^. partsOf (traversed . filtered even)
+-- [2,4]
+
+-- |
+-- >>> ["Aardvark", "Bandicoot", "Capybara"] ^. traversed . partsOf (taking 3 traversed)
+-- "AarBanCap"
+
+-- |
+--     ([1, 2], M.fromList [('a', 3), ('b', 4)]) ^. partsOf _
+-- >>> ([1, 2], M.fromList [('a', 3), ('b', 4)]) ^. partsOf (beside traversed each)
+-- [1,2,3,4]
+
+-- Setting
+
+-- |
+--     [1, 2, 3, 4] & partsOf (traversed . _            ) .~ [20, 40]
+-- >>> [1, 2, 3, 4] & partsOf (traversed . filtered even) .~ [20, 40]
+-- [1,20,3,40]
+
+-- |
+--     ["Aardvark", "Bandicoot", "Capybara"] & partsOf _                       .~ "Kangaroo"
+-- >>> ["Aardvark", "Bandicoot", "Capybara"] & partsOf (traversed . traversed) .~ "Kangaroo"
+-- ["Kangaroo","Bandicoot","Capybara"]
+
+-- |
+-- >>> ["Aardvark", "Bandicoot", "Capybara"] & partsOf (traversed . traversed) .~ "Ant"
+-- ["Antdvark","Bandicoot","Capybara"]
+
+-- Modifying
+
+-- |
+-- Map values are traversed in order by key!
+-- >>> M.fromList [('a', 'a'), ('b', 'b'), ('c', 'c')] & partsOf traversed %~ \(x:xs) → xs ++ [x]
+-- fromList [('a','b'),('b','c'),('c','a')]
+
+-- |
+-- >>> ('a', 'b', 'c') & partsOf each %~ reverse
+-- ('c','b','a')
+
+-- Bonus
+
+-- |
+-- >>> [1, 2, 3, 4, 5, 6] & partsOf (taking 3 traversed) %~ reverse
+-- [3,2,1,4,5,6]
+
+-- |
+-- >>> ('a', 'b', 'c') & unsafePartsOf each %~ \xs → fmap ((,) xs) xs
+-- (("abc",'a'),("abc",'b'),("abc",'c'))
+
 --------------------------------------------------------------------------------------------
 --                               Indexable Structures                                     --
 --------------------------------------------------------------------------------------------
 
---------------------------------------
--- What's an *indexable* structure? --
---------------------------------------
+------------------------------------
+-- What's an Indexable Structure? --
+------------------------------------
 
 -- |
--- Getting values at an index uses !!
--- >>> let xs = ["Henry I", "Henry II", "Henry III"]
--- >>> xs !! 0
+-- Getting values at an index using `!!`.
+-- >>> ["Henry I", "Henry II", "Henry III"] !! 0
 -- "Henry I"
 
 -- |
--- >>> let xs = ["Henry I", "Henry II", "Henry III"]
--- >>> xs !! 1
+-- >>> ["Henry I", "Henry II", "Henry III"] !! 1
 -- "Henry II"
 
 -- |
--- let xs = ["Henry I", "Henry II", "Henry III"]
--- xs !! 3
+-- ["Henry I", "Henry II", "Henry III"] !! 3
 -- Prelude.!!: index too large
 
 -- |
--- Maps use `lookup` to 'get' values at an index
--- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
--- >>> M.lookup "Leo" turtles
+-- Maps use `lookup` to get values at an index.
+-- >>> M.lookup "Leo" (M.fromList [("Leo", "Katanas"), ("Raph", "Sai")])
 -- Just "Katanas"
 
 -- |
 -- Maps use `adjust` to update the value at an index
--- >>> let turtles = M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
--- >>> M.adjust ("Two " <>) "Leo" turtles
+-- >>> M.adjust ("Two " <>) "Leo" (M.fromList [("Leo", "Katanas"), ("Raph", "Sai")])
 -- fromList [("Leo","Two Katanas"),("Raph","Sai")]
 
 -----------------------------------------------
