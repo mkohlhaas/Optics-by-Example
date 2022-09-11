@@ -3975,7 +3975,7 @@ left handler (Right x) = pure (Right x)
 
 -- 5. BONUS: Reimplement the beside traversal:
 
-beside' ∷ Traversal s t a b → Traversal s' t' a b → Traversal (s,s') (t,t') a b
+beside' ∷ Traversal s t a b → Traversal s' t' a b → Traversal (s, s') (t, t') a b
 beside' left right handler (s, s') = (,) <$> (s & left %%~ handler) <*> (s' & right %%~ handler)
 
 -- Hint: You can use traverseOf or %%∼ to help simplify your implementation!
@@ -5032,11 +5032,20 @@ instance At PostalAddress where
 -- Prisms can be run backwards, taking a focus and embedding it into a structure!
 -- We'll see how prisms are a natural candidate for specifying pattern-matching semantics and help to work with sum-types as well.
 
+-- For running a Prism forwards  run `preview` (^?).
+-- For running a Prism backwards run `review`  (#).
+--
+
 ------------------------------------
 -- Simple Pattern-Matching Prisms --
 ------------------------------------
 
--- For the `Either` type we have `_Left` and `_Right` prisms
+-- For the `Either` type we have `_Left` and `_Right` prisms.
+-- _Left  ∷ Prism (Either l r) (Either l' r ) l l'
+-- _Right ∷ Prism (Either l r) (Either l  r') r r'
+
+-- These prisms will pattern match on the Left or Right side of the either type, focusing on the value inside.
+-- We can use `preview` (^?) to "run" the pattern match, returning Nothing if it's not a match:
 
 -- |
 -- >>> Left "message" ^? _Left
@@ -5055,7 +5064,7 @@ instance At PostalAddress where
 -- Nothing
 
 -- |
--- Since prisms are valid traversals we can set, update, or traverse the focused value through them:
+-- Since prisms are valid traversals we can set, update, or traverse the focused value through them.
 -- >>> Left 10 & _Left +~ 5
 -- Left 15
 
@@ -5063,8 +5072,11 @@ instance At PostalAddress where
 -- >>> Right "howdy" & _Right %~ reverse
 -- Right "ydwoh"
 
+-- Analogously for `Maybe`.
+-- _Nothing ∷ Prism' (Maybe a) ()
+-- _Just    ∷ Prism  (Maybe a) (Maybe b) a b
+
 -- |
--- Same for `Maybe`.
 -- >>> Nothing ^? _Nothing
 -- Just ()
 
@@ -5081,12 +5093,18 @@ instance At PostalAddress where
 -- Nothing
 
 -- |
--- >>> Just 20 & _Just %~ (+10)
+-- >>> Just 20 & _Just %~ (+ 10)
 -- Just 30
 
 -----------------------------------------------------------
 -- Checking Pattern Matches with Prisms (`has`, `isn't`) --
 -----------------------------------------------------------
+
+-- has   ∷ Fold  s   a   → s → Bool
+-- isn't ∷ Prism s t a b → s → Bool
+
+-- `has` checks whether the given fold yields any elements when run on the provided structure; while
+-- `isn't` returns whether a given prism does not match the input.
 
 -- |
 -- >>> has _Right (Left "message")
@@ -5108,7 +5126,7 @@ instance At PostalAddress where
 -- Generating Prisms with `makePrisms` --
 -----------------------------------------
 
--- A path is a list of URL segments
+-- A path is a list of URL segments.
 type Path = [String]
 
 type Body = String
@@ -5122,7 +5140,12 @@ data Request
 -- Creates `_Post` `_Get` and `_Delete` prisms.
 makePrisms ''Request
 
--- This is all we need to use these prisms for getting or setting as if they were traversals:
+-- See also `:browse` in the REPL:
+-- _Post   ∷ Prism' Request (Path, Body)  -- Note the tuple!
+-- _Get    ∷ Prism' Request  Path
+-- _Delete ∷ Prism' Request  Path
+
+-- This is all we need to use these prisms for getting or setting as if they were traversals.
 
 -- |
 -- >>> Get ["users"] ^? _Get
@@ -5148,26 +5171,45 @@ makePrisms ''Request
 -- Embedding Values with Prisms --
 ----------------------------------
 
--- Every prism represents a pattern-match which can be *reversed*.
--- By feeding a prism a focus we can embed that focus into a structure via the context implied by the pattern.
+-- Every prism represents a pattern-match which can be REVERSED!
+-- By feeding a prism a focus we can embed that focus into a structure via the context implied by the pattern!
 -- Even though viewing through a prism may fail if the pattern doesn't match, embedding a value into a pattern using a prism always succeeds!
--- To run a prism backwards we use the `review` action or its infix version (#); which you can think of as short for "reverse view".
+-- To run a prism backwards we use the `review` (#), which you can think of as short for "reverse view".
 -- It embeds the focus into the prism's pattern.
 
--- |
+-- (#) is comparable to the pipe operator in PureScript.
+-- PureScript's (#) is (&) in Haskell.
+
+-- review ∷ Prism s t a b → b → t
+-- (#)    ∷ Prism s t a b → b → t
+
 -- Prisms which match on a constructor of some type can be reversed to embed fields into the constructor.
 -- The reverse of unpacking a specific constructor is to pack those fields into that constructor.
+
+-- |
+-- >>> Get ["posts"]
+-- Get ["posts"]
+
+-- |
 -- >>> review _Get ["posts"]
 -- Get ["posts"]
 
 -- |
--- We can use the infix alias to accomplish the same:
+-- using the infix operator
 -- >>> _Get # ["posts"]
 -- Get ["posts"]
 
 -- |
+-- >>> Delete ["posts"]
+-- Delete ["posts"]
+
+-- |
 -- >>> _Delete # ["posts"]
 -- Delete ["posts"]
+
+-- |
+-- >>> Post ["posts"] "My blog post"
+-- Post ["posts"] "My blog post"
 
 -- |
 -- Constructors with multiple fields accept a tuple of the fields.
@@ -5175,18 +5217,38 @@ makePrisms ''Request
 -- Post ["posts"] "My blog post"
 
 -- |
--- Construct a `Left` from a string
+-- >>> Left "an error"
+-- Left "an error"
+
+-- |
+-- constructing a `Left` from a string
 -- >>> review _Left "an error"
 -- Left "an error"
+
+-- |
+-- constructing a `Left` from a string
+-- >>> _Left # "an error"
+-- Left "an error"
+
+-- |
+-- >>> Right 42
+-- Right 42
 
 -- |
 -- >>> review _Right 42
 -- Right 42
 
 -- |
--- composing prisms
+-- >>> _Right # 42
+-- Right 42
+
+-- |
+-- Since composing prisms results in a new prism, we can compose prisms before passing them to review to build a nested constructor function.
 -- >>> _Just . _Left # 1337
 -- Just (Left 1337)
+
+-- We could and should use the normal constructors.
+-- But, the ability to reverse a prism can be used to implement some of the prism combinators we'll look at later on.
 
 -----------------------------
 -- Other Types of Patterns --
@@ -5195,9 +5257,15 @@ makePrisms ''Request
 -- Although most of the prisms you'll encounter will be used for matching on data type constructors, prisms can also encode more complex and abstract patterns.
 -- Unlike regular pattern matching if a prism fails to match it won't crash, instead the prism simply won't focus anything.
 
+-- The `_Cons` prism handles the common task of peeling an element off the top of a list-like type, e.g. lists, vectors, Strings, ...
+
 -- |
+-- `_Cons` is a prism.
 -- >>> [1, 2, 3] ^? _Cons
 -- Just (1,[2,3])
+
+-- specialized type signature for String
+-- _Cons ∷ Prism' String (Char, String)
 
 -- |
 -- >>> "Freedom!" ^? _Cons
@@ -5212,14 +5280,14 @@ makePrisms ''Request
 -- "F!modeer"
 
 -- |
--- `_Cons` is a prism, so we can run it backwards using `review` (a.k.a. `#`), to cons an element onto the front of a list-like type.
+-- Since `_Cons` is a prism we can run it backwards using `review` (#) to cons an element onto the front of a list-like type.
 -- This operation will never fail!
 -- >>> _Cons # ('F', "reedom")
 -- "Freedom"
 
 -- |
--- >>> "Freedom!" & _tail %~ reverse
--- "F!modeer"
+-- >>> "Freedom" & _tail %~ reverse
+-- "Fmodeer"
 
 -- |
 -- >>> "Hello" & _head .~ 'J'
@@ -5238,7 +5306,8 @@ makePrisms ''Request
 -- True
 
 -- |
--- The phrasing for 'has' isn't quite as clear Feel free to simply define 'is = has' if that helps.
+-- The phrasing for 'has' isn't quite as clear.
+-- Feel free to simply define 'is = has' if that helps!!!
 -- >>> has _Empty M.empty
 -- True
 
@@ -5251,12 +5320,14 @@ makePrisms ''Request
 -- If the string fails to parse into the output type properly the prism will not match.
 -- To run it in reverse it calls "show" on the provided value to turn it back into a string.
 
+-- _Show ∷ (Read a, Show a) ⇒ Prism' String a
+
 -- |
 -- >>> "12" ^? _Show ∷ Maybe Int
 -- Just 12
 
 -- |
--- The type we assert is important. If we pick a different type it changes the behaviour.
+-- The type we assert is important. If we pick a different type it changes the behavior.
 -- >>> "12" ^? _Show ∷ Maybe Bool
 -- Nothing
 
@@ -5275,6 +5346,77 @@ makePrisms ''Request
 -- Changing the expected type can even change the result!
 -- >>> "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Bool]
 -- [True]
+
+------------------------
+-- Exercises - Prisms --
+------------------------
+
+-- 1. Which prisms will be generated from the following data declaration? Give their names and types!
+
+data ContactInfo
+  = CiEmail String
+  | CiTelephone Int
+  | CiAddress String String String
+
+makePrisms ''ContactInfo
+
+-- 2. Fill in the blanks
+
+-- |
+--     Right 35 & _ +~ 5
+-- >>> Right 35 & _ +~ 5
+
+-- Right 40
+
+-- |
+--     [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] ^.. folded . _
+-- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] ^.. folded . _
+
+-- ["Mind","Power","Soul","Time"]
+
+-- |
+--     [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] & _ <>~ " Stone"
+-- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] & _ <>~ " Stone"
+
+-- [ Just "Mind Stone"
+-- , Just "Power Stone"
+-- , Nothing
+-- , Just "Soul Stone"
+-- , Nothing
+-- , Just "Time Stone"
+-- ]
+
+-- |
+--     Left (Right True, "Eureka!") & _ %~ not
+-- >>> Left (Right True, "Eureka!") & _ %~ not
+
+-- Left (Right False, "Eureka!")
+
+-- |
+--     _Cons _ ("Do",["Re", "Mi"])
+-- >>> _Cons _ ("Do",["Re", "Mi"])
+
+-- ["Do", "Re", "Mi"]
+
+-- |
+--     isn't (_Show ∷ _) "not an int"
+-- >>> isn't (_Show ∷ _) "not an int"
+
+-- True
+
+-- 3. Write expressions to get the output from the provided input!
+
+-- a)
+-- input  = (Just 1, Nothing, Just 3)
+-- output = [1, 3]
+
+-- b)
+-- input  = ('x', "yz")
+-- output = "xzy"
+
+-- c)
+-- input  = "do the hokey pokey"
+-- output = Left (Just (Right "do the hokey pokey"))
 
 ---------------------------
 -- Writing Custom Prisms --
