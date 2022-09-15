@@ -14,7 +14,7 @@ import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
 import Data.Function (on)
-import Data.List (intercalate, sort, stripPrefix)
+import Data.List (intercalate, nub, sort, stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
@@ -5029,8 +5029,8 @@ instance At PostalAddress where
 -- Traversal  |   Many   |   Many     | Many     |   ✗
 -- Prism      | Zero/One |  Zero/One  | Zero/One |  One
 
--- Prisms can be run backwards, taking a focus and embedding it into a structure!
--- We'll see how prisms are a natural candidate for specifying pattern-matching semantics and help to work with sum-types as well.
+-- Prisms can be run BACKWARDS, taking a focus and embedding it into a structure!
+-- We'll see how prisms are a natural candidate for specifying PATTERN-MATCHING semantics and help to work with sum-types as well.
 
 -- For running a Prism forwards  run `preview` (^?).
 -- For running a Prism backwards run `review`  (#).
@@ -5360,48 +5360,40 @@ data ContactInfo
 
 makePrisms ''ContactInfo
 
+-- _CiEmail     ∷ Prism' ContactInfo String
+-- _CiTelephone ∷ Prism' ContactInfo Int
+-- _CiAddress   ∷ Prism' ContactInfo (String, String, String)
+
 -- 2. Fill in the blanks
 
 -- |
 --     Right 35 & _ +~ 5
--- >>> Right 35 & _ +~ 5
-
+-- >>> Right 35 & _Right +~ 5
 -- Right 40
 
 -- |
 --     [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] ^.. folded . _
--- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] ^.. folded . _
-
+-- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] ^.. folded . _Just
 -- ["Mind","Power","Soul","Time"]
 
 -- |
 --     [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] & _ <>~ " Stone"
--- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] & _ <>~ " Stone"
-
--- [ Just "Mind Stone"
--- , Just "Power Stone"
--- , Nothing
--- , Just "Soul Stone"
--- , Nothing
--- , Just "Time Stone"
--- ]
+-- >>> [Just "Mind", Just "Power", Nothing, Just "Soul", Nothing, Just "Time"] & traversed . _Just <>~ " Stone"
+-- [Just "Mind Stone",Just "Power Stone",Nothing,Just "Soul Stone",Nothing,Just "Time Stone"]
 
 -- |
 --     Left (Right True, "Eureka!") & _ %~ not
--- >>> Left (Right True, "Eureka!") & _ %~ not
-
--- Left (Right False, "Eureka!")
+-- >>> Left (Right True, "Eureka!") & _Left . _1 . _Right %~ not
+-- Left (Right False,"Eureka!")
 
 -- |
 --     _Cons _ ("Do",["Re", "Mi"])
--- >>> _Cons _ ("Do",["Re", "Mi"])
-
--- ["Do", "Re", "Mi"]
+-- >>> _Cons # ("Do",["Re", "Mi"])
+-- ["Do","Re","Mi"]
 
 -- |
 --     isn't (_Show ∷ _) "not an int"
--- >>> isn't (_Show ∷ _) "not an int"
-
+-- >>> isn't (_Show ∷ Prism' String Bool) "not an int"
 -- True
 
 -- 3. Write expressions to get the output from the provided input!
@@ -5410,29 +5402,60 @@ makePrisms ''ContactInfo
 -- input  = (Just 1, Nothing, Just 3)
 -- output = [1, 3]
 
+-- |
+-- >>> (Just 1, Nothing, Just 3) ^.. each . _Just
+-- [1,3]
+
 -- b)
 -- input  = ('x', "yz")
 -- output = "xzy"
+
+-- |
+-- >>> ('x', "yz") & review _Cons & _tail %~ reverse
+-- "xzy"
 
 -- c)
 -- input  = "do the hokey pokey"
 -- output = Left (Just (Right "do the hokey pokey"))
 
+-- |
+-- >>> _Left . _Just . _Right # "do the hokey pokey"
+-- Left (Just (Right "do the hokey pokey"))
+
 ---------------------------
 -- Writing Custom Prisms --
 ---------------------------
+
+-- We can build a prism for any pattern which we can reverse.
+-- We can imagine a prism as "refracting" your data, splitting it up and focusing only the pieces which match the pattern, dissipating the rest.
+-- Luckily the lens library provides us with some helpers to make constructing prisms easy and fool-proof.
+
+--         EMBEDDING FUNCTION
+--             |
+--             |     MATCHING FUNCITON
+--             |             |
+-- prism  ∷ (b → t) → (s → Either t a) → Prism s t a b
+-- prism' ∷ (b → s) → (s → Maybe a)    → Prism s s a b
+
+-- The EMBEDDING FUNCTION is where you specify how to reverse your pattern match by embedding the prism's focus back into the pattern.
+-- This is the function which will be called when reviewing and it must never fail.
+
+-- The MATCHING FUNCTION determines whether the prism matches or fails.
+-- For polymorphic prisms where `s` is not equal to `t` the match function must return a member of the type which matches the new type `t`.
+-- This allows type changing traversals to work even when the prism fails to match.
+-- For simpler prisms it's sufficient to provide Just the focus, or Nothing if the match fails.
 
 _Just' ∷ Prism (Maybe a) (Maybe b) a b
 _Just' = prism embed match
   where
     embed ∷ b → Maybe b
-    embed b = Just b
+    embed = Just
 
     match ∷ Maybe a → Either (Maybe b) a
     match (Just a) = Right a
     match Nothing = Left Nothing
 
--- Since the _Nothing prism doesn’t focus the type variable we know it can’t be a polymorphic prism.
+-- Since the _Nothing prism doesn't focus the type variable we know it can't be a polymorphic prism.
 -- This means we can use the simpler prism' helper in this case.
 _Nothing' ∷ Prism' (Maybe a) ()
 _Nothing' = prism' embed match
@@ -5448,6 +5471,7 @@ _Nothing' = prism' embed match
 -- Matching String Prefixes --
 ------------------------------
 
+-- We want to match strings starting with a fixed prefix, and ignore ones that don't.
 _Prefix ∷ String → Prism' String String
 _Prefix prefix = prism' embed match
   where
@@ -5455,7 +5479,11 @@ _Prefix prefix = prism' embed match
     embed s = prefix <> s
 
     match ∷ String → Maybe String
-    match s = stripPrefix prefix s
+    match = stripPrefix prefix
+
+-- When we run a prism we strip away the part of the data that we matched.
+-- The idea is that we should be able to match and then embed and end up back where we started.
+-- If we simply returned the original string without stripping the prefix first we'd end up with a duplicated prefix after making the round trip!
 
 -- |
 -- >>> "http://phishingscam.com" ^? _Prefix "https://"
@@ -5465,9 +5493,10 @@ _Prefix prefix = prism' embed match
 -- >>> "https://totallylegit.com" ^? _Prefix "https://"
 -- Just "totallylegit.com"
 
--- |
 -- We can even define new prisms using our existing one.
 -- Only add our account number if the connection is secure!
+
+-- |
 -- >>> let _Secure = _Prefix "https://"
 -- >>> "https://mybank.com" & _Secure <>~ "?accountNumber=12345"
 -- "https://mybank.com?accountNumber=12345"
@@ -5513,7 +5542,8 @@ _Factor n = prism' embed match
 -- >>> 15 ^? _Factor 7
 -- Nothing
 
--- Notice how we ‘divide out’ the number when we match. This allows us to properly chain our matches and discover more factors!
+-- Notice how we `divide out` the number when we match.
+-- This allows us to properly chain our matches and discover more factors!
 
 -- |
 -- >>> 15 ^? _Factor 3 . _Factor 5
@@ -5532,20 +5562,125 @@ prismFizzBuzz n
   | otherwise = show n
 
 runFizzBuzz ∷ IO ()
-runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn (prismFizzBuzz n)
+runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn $ show n <> "\t" <> prismFizzBuzz n
+
+-- 1	1
+-- 2	2
+-- 3	Fizz
+-- 4	4
+-- 5	Buzz
+-- 6	Fizz
+-- 7	7
+-- 8	8
+-- 9	Fizz
+-- 10	Buzz
+-- 11	11
+-- 12	Fizz
+-- 13	13
+-- 14	14
+-- 15	FizzBuzz
+-- 16	16
+-- 17	17
+-- 18	Fizz
+-- 19	19
+-- 20	Buzz
+
+-------------------------------
+-- Exercises - Custom Prisms --
+-------------------------------
+
+-- 1. Try to write a custom prism for matching on the tail of a list:
+
+-- _Tail ∷ Prism' [a] [a]
+
+-- Is this possible? Why or why not?
+
+-- Can't be implemented. We can't write an embed function for `_Tail`.
+
+-- 2. Implement `_Cons` for lists using `prism`:
+
+_ListCons ∷ Prism [a] [b] (a, [a]) (b, [b])
+_ListCons = prism embed match
+  where
+    embed ∷ (b, [b]) → [b]
+    embed (x, xs) = x : xs
+
+    match ∷ [a] → Either [b] (a, [a])
+    match [] = Left []
+    match (x : xs) = Right (x, xs)
+
+-- 3. BONUS: Implement `_Cycles` which detects whether a list consists of exactly 'n' repetitions of a pattern.
+
+_Cycles ∷ (Eq a) ⇒ Int → Prism' [a] [a]
+_Cycles n = prism' embed match
+  where
+    embed ∷ [a] → [a]
+    embed = concat . replicate n
+
+    match ∷ (Eq a) ⇒ [a] → Maybe [a]
+    match xs =
+      let chunk = take (length xs `div` n) xs
+       in if concat (replicate n chunk) == xs then Just chunk else Nothing
+
+-- `_Cycles` should behave as follows:
 
 -- |
--- runFizzBuzz
+-- Find the subsequence which has been repeated exactly 3 times.
+-- >>> "dogdogdog" ^? _Cycles 3
+-- Just "dog"
+
+-- |
+-- The input isn't exactly 3 cycles of some input (it's 4), so we don't match.
+-- >>> "dogdogdogdog" ^? _Cycles 3
+-- Nothing
+
+-- |
+-- The input is exactly 3 cycles of 'a'.
+-- >>> "aaa" ^? _Cycles 3
+-- Just "a"
+
+-- |
+-- The input isn't a cycle at all.
+-- >>> "xyz" ^? _Cycles 3
+-- Nothing
+
+-- |
+-- We can review to create cycles.
+-- >>> _Cycles 3 # "dog"
+-- "dogdogdog"
+
+-- |
+-- We can mutate the sequence that's cycled.
+-- >>> "dogdogdog" & _Cycles 3 .~ "cats"
+-- "catscatscats"
+
+-- Can you implement a version of _Cycles which doesn't depend on a specific iteration count? Why or why not?
+-- No! Can't formulate an embedding function.
 
 ----------
 -- Laws --
 ----------
 
+-- Prism is a reversible pattern match.
+
 -----------------------------
 -- Law One: Review-Preview --
 -----------------------------
 
+-- This law entails the notion that review embeds values into the same pattern the prism matches.
+-- If we review a value through a prism, then preview it through the same prism we should end up back where we started (with an extra Just).
+-- First embed then match!
+
 -- preview p (review p value) == Just value
+-- (p # value) ^? p == Just value
+
+-- |
+-- >>> review _Left "Jabberwocky"
+-- Left "Jabberwocky"
+
+-- |
+-- >>> _Left # "Jabberwocky"
+-- Left "Jabberwocky"
 
 -- |
 -- >>> preview _Left (review _Left "Jabberwocky") == Just "Jabberwocky"
@@ -5555,23 +5690,30 @@ runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn (prismFizzBuzz n)
 -- >>> preview _Just (review _Just "Jabberwocky") == Just "Jabberwocky"
 -- True
 
+-- |
+-- >>> (_Just # "Jabberwocky") ^? _Just == Just "Jabberwocky"
+-- True
+
 -------------------------------
 -- Law Two: Prism Complement --
 -------------------------------
 
--- If we preview with a matching prism to get the focus 'a'
+-- This law is effectively the inverse of the previous law.
+-- First match then embed!
+
+-- If we preview with a matching prism to get the focus 'a' ...
 -- let Just a = preview myPrism s
 
--- Then we 'review' that focus 'a'
+-- and then 'review' that focus 'a' ...
 -- let s' = review myPrism a
 
--- We must end up back where we started
+-- then we must end up back where we started.
 -- s == s'
 
 -- |
 -- >>> let s = Right 32
--- >>> let Just a = preview _Right s
--- >>> let s' = review _Right a
+-- >>> let Just a = preview _Right s  -- calls the matching function
+-- >>> let s' = review _Right a       -- calls the embed function
 -- >>> s == s'
 -- True
 
@@ -5586,20 +5728,26 @@ runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn (prismFizzBuzz n)
 -- |
 -- Note the different spacing:
 -- >>> let s = "[1, 2, 3]"
--- >>> s
--- "[1, 2, 3]"
+-- >>> let Just a = preview (_Show ∷ Prism' String [Int]) s
+-- >>> a
+-- [1,2,3]
 
 -- |
--- _Show has normalized the value to have no spaces between values
+-- _Show has normalized the value to have no spaces between values.
 -- >>> let s = "[1, 2, 3]"
 -- >>> let Just a = preview (_Show ∷ Prism' String [Int]) s
 -- >>> let s' = review _Show a
 -- >>> s'
 -- "[1,2,3]"
 
+-- In practice we don't care. The two values are equal with respect to their semantic meaning.
+
 ---------------------------------------
 -- Law Three: Pass-through Reversion --
 ---------------------------------------
+
+-- `matching` combinator
+-- matching ∷ Prism s t a b → s → Either t a
 
 -- let Left t = matching l s
 -- let Left s' = matching l t
@@ -5619,46 +5767,139 @@ runFizzBuzz = for_ [1 .. 20] $ \n → putStrLn (prismFizzBuzz n)
 -- >>> s == s'
 -- True
 
+----------------------------
+-- Exercises - Prism Laws --
+----------------------------
+
+-- 1. Implement the following prism and determine whether it's lawful:
+
+_Contains ∷ ∀ a. Ord a ⇒ a → Prism' (Set a) (Set a)
+_Contains x = prism' embed match
+  where
+    embed ∷ Set a → Set a
+    embed = S.insert x
+
+    match ∷ Set a → Maybe (Set a)
+    match s = if x `elem` s then Just (S.delete x s) else Nothing
+
+-- It should match on sets which contain the provided element! Reviewing adds the element to the set.
+-- It should behave something like this:
+
+-- |
+-- >>> S.fromList [1, 2, 3] ^? _Contains 2
+-- Just (fromList [1,3])
+
+-- |
+-- >>> S.fromList [1, 2, 3] ^? _Contains 10
+-- Nothing
+
+-- |
+-- >>> _Contains 10 # S.fromList [1, 2, 3]
+-- fromList [1,2,3,10]
+
+-- |
+-- >>> _Contains 2 # S.fromList [1, 2, 3]
+-- fromList [1,2,3]
+
+-- Is it lawful? Why or why not?
+
+-- |
+-- Law One
+-- >>> (_Contains 10 # S.fromList [1, 2, 3]) ^? _Contains 10 == Just (S.fromList [1, 2, 3])
+-- True
+
+-- |
+-- Law One
+-- >>> (_Contains 2 # S.fromList [1, 2, 3]) ^? _Contains 2 == Just (S.fromList [1, 2, 3])
+-- False
+
+-- → Unlawful!!!
+
+-- 2. Is the following prism lawful? Write out the checks to confirm your suspicions.
+
+_Singleton ∷ ∀ a. Prism' [a] a
+_Singleton = prism' embed match
+  where
+    embed ∷ a → [a]
+    embed a = [a]
+
+    match ∷ [a] → Maybe a
+    match [a] = Just a
+    match _ = Nothing
+
+-- |
+-- Law One
+-- >>> (_Singleton # [1, 2, 3]) ^? _Singleton == Just [1, 2, 3]
+-- True
+
+-- |
+-- Law One
+-- >>> (_Singleton # []) ^? _Singleton == Just []
+-- True
+
+-- |
+-- Law Two
+-- >>> let s = [1]
+-- >>> let Just a = preview _Singleton s
+-- >>> let s' = review _Singleton a
+-- >>> s == s'
+-- True
+
+-- → Lawful!!!
+
 -------------------------------
 -- Case Study: Simple Server --
 -------------------------------
 
+-- Every possible request has a path.
+-- Let's build a lens for getting and setting the path no matter the type of request.
 path ∷ Lens' Request Path
 path = lens getter setter
   where
-    getter (Post p body) = p
+    getter ∷ Request → Path
+    getter (Post p _) = p
     getter (Get p) = p
     getter (Delete p) = p
+
+    setter ∷ Request → Path → Request
     setter (Post _ body) p = Post p body
     setter (Get _) p = Get p
     setter (Delete _) p = Delete p
-
--- |
--- >>> Get ["posts", "12345"] ^. path
--- ["posts","12345"]
 
 -- |
 -- >>> Post ["posts", "12345"] "My new post" ^. path
 -- ["posts","12345"]
 
 -- |
+-- >>> Get ["posts", "12345"] ^. path
+-- ["posts","12345"]
+
+-- |
 -- >>> Get ["posts", "12345"] & path .~ ["hello"]
 -- Get ["hello"]
 
--- Default server handler:
+-- |
+-- >>> Delete ["posts", "12345"] ^. path
+-- ["posts","12345"]
+
+-- |
+-- >>> Delete ["posts", "12345"] & path .~ ["hello"]
+-- Delete ["hello"]
+
+-- default server handler
 serveRequest ∷ Request → String
 serveRequest _ = "404 Not Found"
 
 -- |
--- >>> serveRequest (Get ["hello"])
+-- >>> serveRequest $ Post ["hello"] "Is anyone there?"
 -- "404 Not Found"
 
 -- |
--- >>> serveRequest (Delete ["user"])
+-- >>> serveRequest $ Get ["hello"]
 -- "404 Not Found"
 
 -- |
--- >>> serveRequest (Post ["hello"] "Is anyone there?")
+-- >>> serveRequest $ Delete ["user"]
 -- "404 Not Found"
 
 --------------------------
@@ -5699,7 +5940,7 @@ _PathPrefix prefix = prism' embed match
 -- >>> _PathPrefix "posts" # Delete ["12345"]
 -- Delete ["posts","12345"]
 
--- NOTE!!! We could have implemented _PathPrefix much easier using the existing prefix prism from the lens library, but I wanted to show how it works behind the scenes.
+-- NOTE!!! We could have implemented _PathPrefix much easier using the existing `prefixed` prism from the Lens library, but I wanted to show how it works behind the scenes.
 
 ------------------------------------
 -- Altering Sub-Sets of Functions --
@@ -5713,9 +5954,19 @@ _PathPrefix prefix = prism' embed match
 -- >>> tail []
 -- *** Exception: Prelude.tail: empty list
 
--- We pass in the original tail function as the value we’re modifying, then we focus the portion of the
--- function which deals with the empty list by using outside _Empty. We replace that portion of the
--- function with one that always returns [].
+-- a prism combinator
+-- outside ∷ Prism s t a b → Lens (t → r) (s → r) (b → r) (a → r)
+
+-- `outside` lifts a prism so that it matches on the argument of a function and returns a special lens.
+-- This lens focuses on a portion of the provided function, specifically the part of the function which runs when the argument matches the prism.
+
+-- When applied to a prism, the `outside` combinator returns a lens which focuses the subset of a function
+-- which runs when the argument matches the prism, leaving the rest of the function untouched.
+
+-- We pass in the original `tail` function as the value we're modifying, i.e. we are modifying a function.
+-- Then we focus the portion of the function which deals with the empty list by using `outside _Empty`.
+-- We replace that portion of the function with one that always returns [].
+-- In other words: if the argument for `tail` is the empty list, then change `tail` to the function `const []`. In all other cases leave `tail` alone.
 safeTail ∷ [a] → [a]
 safeTail = tail & outside _Empty .~ const []
 
@@ -5740,30 +5991,31 @@ server =
     & outside (_PathPrefix "posts") .~ postsHandler
 
 -- |
--- >>> server (Get ["users", "12345"])
+-- >>> server $ Get ["users", "12345"]
 -- "User handler! Remaining path: 12345"
 
 -- |
--- >>> server (Delete ["users", "12345", "profile"])
+-- >>> server $ Delete ["users", "12345", "profile"]
 -- "User handler! Remaining path: 12345/profile"
 
 -- |
 -- It should run the default handler for non user paths.
--- >>> server (Post ["admin"] "DROP TABLE users")
+-- >>> server $ Post ["admin"] "DROP TABLE users"
 -- "404 Not Found"
 
 -- |
--- >>> server (Get ["posts"])
+-- >>> server $ Get ["posts"]
 -- "Posts Handler!"
 
 -- |
--- >>> server (Get ["posts", "index"])
+-- >>> server $ Get ["posts", "index"]
 -- "Post Index"
 
 ---------------------------
 -- Matching on HTTP Verb --
 ---------------------------
 
+-- We can access specific fields of our request type in a perfectly type-safe way!
 postsHandler' ∷ Request → String
 postsHandler' =
   const "404 Not Found"
@@ -5777,16 +6029,32 @@ server' =
     & outside (_PathPrefix "posts") .~ postsHandler'
 
 -- |
--- >>> server' (Get ["posts", "12345"])
+-- >>> server' $ Get ["posts", "12345"]
 -- "Fetching post at path: 12345"
 
 -- |
--- >>> server' (Post ["posts", "12345"] "My new post")
+-- >>> server' $ Post ["posts", "12345"] "My new post"
 -- "Created post with body: My new post"
 
 -- |
--- >>> server' (Delete ["posts", "12345"])
+-- >>> server' $ Delete ["posts", "12345"]
 -- "Deleting post at path: 12345"
+
+-- This is the equivalent code using classic Haskell pattern matching:
+postsHandler'' ∷ Request → String
+postsHandler'' (Post path' body) = "Created post with body: " <> body
+postsHandler'' (Get path') = "Fetching post at path: " <> intercalate "/" path'
+postsHandler'' (Delete path') = "Deleting post at path: " <> intercalate "/" path'
+
+-- This standard code is much more readable, easier to understand, doesn't need a "default case", and
+-- will automatically be checked for completeness (if you've told GHC to check for incomplete pattern matches).
+
+-- So when should you use prisms?
+
+-- 1. Prisms are composable: doing multiple pattern matches in standard Haskell requires nesting function calls or case expressions
+
+-- 2. Prisms interoperate with the rest of optics, providing a lot of flexibility and expressiveness.
+--    You can perform pattern matching inside of an optics chain!
 
 --------------------------------------------------------------------------------------------
 --                                          Isos                                          --
