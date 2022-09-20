@@ -9,12 +9,13 @@ import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
 import Control.Monad.State
 import Data.Bits.Lens (bitAt)
 import Data.ByteString (ByteString)
-import Data.Char (isAlpha, isNumber, toLower, toUpper)
+import Data.Char (isAlpha, isNumber, isUpper, toLower, toUpper)
 import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
 import Data.Function (on)
-import Data.List (intercalate, nub, sort, stripPrefix)
+import Data.List (intercalate, nub, sort, sortOn, stripPrefix, transpose, elemIndex)
+import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
@@ -6060,19 +6061,25 @@ postsHandler'' (Delete path') = "Deleting post at path: " <> intercalate "/" pat
 --                                          Isos                                          --
 --------------------------------------------------------------------------------------------
 
+--------------------------
+-- Introduction to Isos --
+--------------------------
+
+-- An isomorphism is a COMPLETELY REVERSIBLE transformation between two types or formats.
+
 -----------------------------------------
 -- How do Isos Fit into the Hierarchy? --
 -----------------------------------------
 
---            | Get      | Set/Modify | Traverse | Embed
+--            |    Get   | Set/Modify | Traverse | Embed
 ---------------------------------------------------------
--- Lens       |  Single  |   Single   | Single   |   ✗
--- Fold       |   Many   |     ✗      |   ✗      |   ✗
--- Traversal  |   Many   |   Many     | Many     |   ✗
+-- Lens       |  Single  |   Single   |  Single  |   ✗
+-- Fold       |   Many   |     ✗      |    ✗     |   ✗
+-- Traversal  |   Many   |   Many     |   Many   |   ✗
 -- Prism      | Zero/One |  Zero/One  | Zero/One |   ✓
--- Iso        |  Single  |   Single   | Single   |   ✓
+-- Iso        |  Single  |   Single   |  Single  |   ✓
 
--- Because Isos are completely reversible they’re the strongest of all the optics we’ve seen.
+-- Because Isos are completely reversible they're the strongest of all the optics we've seen.
 -- By strongest I actually mean most constrained.
 -- Every Iso MUST succeed for all inputs, and MUST be completely reversible.
 -- These strong constraints let us do a lot with them!
@@ -6089,6 +6096,8 @@ postsHandler'' (Delete path') = "Deleting post at path: " <> intercalate "/" pat
 -- There and Back Again --
 --------------------------
 
+-- An isomorphism is just a pair of functions where each function is the inverse of the other.
+
 -- uncurry . curry == id
 -- curry . uncurry == id
 
@@ -6097,47 +6106,68 @@ postsHandler'' (Delete path') = "Deleting post at path: " <> intercalate "/" pat
 -- T.pack . T.unpack == id
 -- T.unpack . T.pack == id
 
+-- T.pack . T.unpack == T.unpack . T.pack
+
+-- generally
+-- to . from == from . to
+
 -------------------
 -- Building Isos --
 -------------------
 
--- An iso is an optic which views data after running its transformation on it.
+-- An Iso is an optic which views data after running its transformation on it.
 -- We can view, modify or traverse the data in it's altered form!
 -- If we modify the data in its altered form, the iso will convert the result back through the iso into the original form.
 -- E.g. we can use an iso to edit a String as though it were a Text, and end up with a String again after the modification.
 
 -- We convert the data through the Iso, run the modification, then convert it back.
 
-packed ∷ Iso' String Text
-packed = iso to' from'
-  where
-    to' ∷ String → Text
-    to' = T.pack
+--         to       from
+--          |         |
+-- iso ∷ (s → a) → (b → t) → Iso s t a b
 
-    from' ∷ Text → String
-    from' = T.unpack
+packed ∷ Iso' String Text
+packed = iso to from
+  where
+    to ∷ String → Text
+    to = T.pack
+
+    from ∷ Text → String
+    from = T.unpack
 
 -- |
--- Using `packed` views Strings as though they were Text.
--- >>> "Ay, caramba!" ^. packed
+-- Using `packed` views Strings as though they were Text (String → Text).
+-- >>> ("Ay, caramba!" ∷ String) ^. packed
 -- "Ay, caramba!"
 
 -- |
--- `review`ing an iso runs its inverse
--- packed # ("Sufferin' Succotash" ∷ Text)
--- "Sufferin' Succotash" ∷ String
+-- `review`ing an iso runs its inverse (Text → String).
+-- Here we use Iso as a Prism. Reviewing an Iso runs its inverse.
+-- So we go from Text to String when reviewing `packed`.
+-- packed # ("Suffering Succotash" ∷ Text)
+-- "Suffering Succotash" ∷ String
 
 -------------------------------
 -- Flipping Isos with `from` --
 -------------------------------
 
+-- `from` turns an iso backwards:
+-- We can use from to flip existing Isos!
+
+-- from ∷ Iso  s t a b → Iso  b a t s
+-- from ∷ Iso' s   a   → Iso'   a   s      -- simpler form
+
 -- |
+-- String → Text
 -- >>> ("Good grief" ∷ String) ^. packed
 -- "Good grief"
 
 -- |
+-- Text → String
 -- ("Good grief" ∷ Text) ^. from packed
 -- "Good grief" ∷ String
+
+-- Using `from` to inverse/flip an Iso.
 unpacked ∷ Iso' Text String
 unpacked = from packed
 
@@ -6149,6 +6179,7 @@ unpacked = from packed
 
 -- |
 -- Using the awesome `replace` function from Text.
+-- No need to implement a replace function for Strings.
 -- let str = "Idol on a pedestal" ∷ String
 -- str & packed %~ T.replace "Idol" "Sand"
 -- "Sand on a pedestal"
@@ -6161,17 +6192,31 @@ unpacked = from packed
 
 -- |
 -- We can of course compose Isos with other optics!
--- We could just use `T.toUpper` instead, but this demonstrates the point:
+-- (We could just use `T.toUpper` instead, but this demonstrates the point.)
 -- let txt = "Lorem ipsum" ∷ Text
 -- txt & from packed . traversed %~ toUpper
+-- "LOREM IPSUM"
+
+-- |
+-- let txt = "Lorem ipsum" ∷ Text
+-- txt & unpacked . traversed %~ toUpper
 -- "LOREM IPSUM"
 
 -------------------------------
 -- Varieties of Isomorphisms --
 -------------------------------
 
+-- Many isomorphisms are trivial but still useful.
+-- Things like converting between encodings, text formats, strict/lazy representations.
+-- Or even conversions between data structures with different performance characteristics (e.g. Linked List/Vector).
+
+-- There are interesting isomorphisms that don't even change the type of the data!
 reversed' ∷ Iso' [a] [a]
 reversed' = iso reverse reverse
+
+-- `involuted` is helper for building isomorphisms where a function is its own inverse.
+-- involuted ∷ (a → a) → Iso' a a
+-- involuted f = iso f f
 
 reversed'' ∷ Iso' [a] [a]
 reversed'' = involuted reverse
@@ -6189,28 +6234,49 @@ reversed'' = involuted reverse
 -- [3]
 
 -- |
+-- >>> [1, 2, 3] & reversed'' %~ take 2
+-- [2,3]
+
+-- |
 -- We gain a lot of power by combining isos with all the other combinators we've learned.
 -- >>> [1, 2, 3, 4] ^.. reversed'' . takingWhile (> 2) traversed
 -- [4,3]
 
 -- |
--- We can reverse more than once! But you probably shouldn't...
+-- >>> "Blue suede shoes" & reversed'' . taking 1 worded .~ "gloves"
+-- "Blue suede sevolg"
+
+-- |
 -- >>> "Blue suede shoes" & reversed'' . taking 1 worded . reversed'' .~ "gloves"
 -- "Blue suede gloves"
 
+-- swap values in a tuple
+-- swapped ∷ Iso' (a, b) (b, a)
+
 -- |
--- swapped lets us view a tuple as though the slots were swapped around.
+-- `swapped` lets us view a tuple as though the slots were swapped around.
 -- >>> ("Fall","Pride") ^. swapped
 -- ("Pride","Fall")
+
+-- The real type of swapped is actually even more general.
+-- It's backed by a Swapped typeclass and works on a lot of different Bifunctors.
+-- swapped ∷ (Bifunctor p, Swapped p) ⇒ Iso (p a b) (p c d) (p b a) (p d c)
 
 -- |
 -- >>> Right "Field" ^. swapped
 -- Left "Field"
 
+-- flip function arguments, flip is its own inverse
+-- flipped ∷ Iso' (a → b → c) (b → a → c)
+
 -- |
 -- >>> let (++?) = (++) ^. flipped
 -- >>> "A" ++? "B"
 -- "BA"
+
+-- curry and uncurry function arguments
+-- curried ∷   Iso' ((a, b) → c) (a → b → c)
+-- uncurried ∷ Iso' (a → b → c) ((a, b) → c)
 
 -- |
 -- >>> let addTuple = (+) ^. uncurried
@@ -6222,7 +6288,8 @@ reversed'' = involuted reverse
 -- -10
 
 -- |
--- >>> over negated (+10) 30
+-- (-30 + 10) * (-1)
+-- >>> over negated (+ 10) 30
 -- 20
 
 -- |
@@ -6230,22 +6297,33 @@ reversed'' = involuted reverse
 -- 150
 
 -- |
--- Be careful of division by 0 for 'dividing' and 'multiplying'
 -- >>> 100.0 ^. dividing 10
 -- 10.0
+
+-- |
+-- Be careful of division by 0 for 'dividing'.
+-- 100.0 ^. dividing 0
+-- Numeric.Lens.dividing: divisor 0
+
+-- |
+-- Be careful of multiplying by 0 for 'multiplying'!
+-- 100.0 ^. multiplying 0
+-- Numeric.Lens.multiplying: factor 0
 
 --------------------
 -- Composing Isos --
 --------------------
 
--- Isos compose just like any other optic! They compose both the ‘forwards’ AND ‘reversed’ transformations.
+-- Isos compose just like any other optic! They compose both the 'forwards' and 'reversed' transformations.
 
 -- |
+-- Text → Text
 -- let txt = "Winter is coming" ∷ Text
 -- txt ^. unpacked . reversed
 -- "gnimoc si retniW"
 
 -- |
+-- Text → Text
 -- let txt = "Winter is coming" ∷ Text
 -- txt & unpacked . reversed %~ takeWhile (not . isSpace)
 -- "coming"
@@ -6302,11 +6380,101 @@ reversed'' = involuted reverse
 
 {- ORMOLU_ENABLE -}
 
+-------------------------------
+-- Exercises - Intro to Isos --
+-------------------------------
+
+-- 1. For each of the following tasks, choose whether it's best suited to a Lens, Traversal, Prism, or Iso:
+
+-- Focus a Celsius temperature in Fahrenheit.              → Iso: the conversion is reversible.
+-- Focus the last element of a list.                       → Traversal: we're selecting a portion of a larger structure which might be missing.
+-- View a JSON object as its corresponding Haskell Record. → Prism: We can always build valid JSON from a record, but may fail to construct a record from the json.
+-- Rotate the elements of a three-tuple one to the right.  → Iso: We can reverse it by rotating back to the left or rotating twice more to the right.
+-- Focus on the ‘bits’ of an Int as Bools.                 → Traversal or Prism: Either of Traversal' Int Bool or Prism [Bool] Int would be reasonable.
+-- Focusing an IntSet from a Set Int.                      → Iso: The conversion is trivially reversible and lossless.
+
+-- 2. Fill in the blanks!
+
+-- |
+--     ("Beauty", "Age") ^. _
+-- >>> ("Beauty", "Age") ^. swapped
+-- ("Age","Beauty")
+
+-- |
+--     50 ^. _ (adding 10)
+-- >>> 50 ^. from (adding 10)
+-- 40
+
+-- |
+--     0 & multiplying _ +~ 12
+-- >>> 0 & multiplying 4 +~ 12
+-- 3.0
+
+-- |
+--     0 & adding 10 . multiplying 2 .~ _
+-- >>> 0 & adding 10 . multiplying 2 .~ 24
+-- 2.0
+
+-- |
+--     [1, 2, 3] & reversed %~ _
+-- >>> [1, 2, 3] & reversed %~ tail
+-- [1,2]
+
+-- |
+--     (view _       (++)) [1, 2] [3, 4]
+-- >>> (view flipped (++)) [1, 2] [3, 4]
+-- [3,4,1,2]
+
+-- |
+--     [1, 2, 3] _ reversed
+-- >>> [1, 2, 3] ^. reversed
+-- [3,2,1]
+
+-- BONUS: Hard ones ahead!
+
+-- |
+-- Note: transpose flips the rows and columns of a nested list:
+-- >>> transpose [[1, 2, 3], [10, 20, 30]]
+-- [[1,10],[2,20],[3,30]]
+
+-- |
+--     [[1, 2, 3], [10, 20, 30]] & involuted transpose %~ _
+-- >>> [[1, 2, 3], [10, 20, 30]] & involuted transpose %~ tail
+-- [[2,3],[20,30]]
+
+-- Extra hard: use `switchCase` somehow to make this statement work:
+
+-- |
+--     (32, "Hi") & _2 . _                           .~ ("hELLO" ∷ String)
+-- >>> let switchCase c = if isUpper c then toLower c else toUpper c
+-- >>> (32, "Hi") & _2 . involuted (fmap switchCase) .~ ("hELLO" ∷ String)
+-- (32,"Hello")
+
+-- 3. You can convert from Celsius to Fahrenheit using the following formula:
+
+celsiusToF ∷ Double → Double
+celsiusToF c = (c * (9 / 5)) + 32
+
+fahrenheitToC ∷ Double → Double
+fahrenheitToC f = (f - 32) * (5 / 9)
+
+-- Implement the following Iso.
+
+fahrenheit' ∷ Iso' Double Double
+fahrenheit' = iso to from
+  where
+    to = celsiusToF
+    from = fahrenheitToC
+
 ---------------------
 -- Projecting Isos --
 ---------------------
 
--- `mappings` let's us easily transform nested portions of structures in our optics path as we go along!
+-- Since they're reversible and guaranteed to succeed, we can sneakily lift an iso over the contents of any Functor by exploiting `fmap`!
+-- mapping' ∷ Functor f ⇒ Iso' s a → Iso' (f s) (f a)
+-- mapping' iso' = iso (fmap $ view iso') (fmap $ review iso')
+
+-- `mapping` let us easily transform nested portions of structures in our optics path as we go along!
 
 toYamlList ∷ [String] → String
 toYamlList xs = "- " <> intercalate "\n- " xs
@@ -6316,6 +6484,7 @@ toYamlList xs = "- " <> intercalate "\n- " xs
 -- "- Milk\n- Eggs\n- Flour"
 
 -- |
+-- Lift an Iso from [Text] to [String].
 -- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [Text]
 -- let strShoppingList = shoppingList ^. mapping unpacked ∷ [String]
 -- toYamlList strShoppingList
@@ -6330,10 +6499,11 @@ toYamlList xs = "- " <> intercalate "\n- " xs
 -- |
 -- We can even use `traverseOf_`!
 -- let shoppingList = ["Milk", "Eggs","Flour"] ∷ [Text]
--- traverseOf_ (mapping unpacked . to toYamlList) putStrLn $ shoppingList
+-- traverseOf_ (mapping unpacked . to toYamlList) putStrLn shoppingList
 -- "- Milk\n- Eggs\n- Flour"
 
--- We can lift isos through functors? That applies to contravariant functors, bifunctors and even profunctors too!
+-- We can lift Isos through functors, e.g. from [String] → String to [Text] → Text
+-- This applies to contravariant functors, bifunctors and even profunctors too!
 -- The functions are called: `contramapping`, `bimapping`, `dimapping`.
 
 -- We can contramap over the input and map over the output all in one go using dimapping!
@@ -6345,6 +6515,59 @@ textToYamlList = toYamlList ^. dimapping (mapping unpacked) packed
 textToYamlList' ∷ [Text] → Text
 textToYamlList' = T.pack . toYamlList . fmap T.unpack
 
+--------------------------------
+-- Exercises - Projected Isos --
+--------------------------------
+
+-- 1. Fill in the blank!
+
+-- |
+--     ("Beauty", "Age") ^. mapping reversed . _
+-- >>> ("Beauty", "Age") ^. mapping reversed . swapped
+-- ("egA","Beauty")
+
+-- |
+--     [True, False, True] ^. mapping (_         not)
+-- >>> [True, False, True] ^. mapping (involuted not)
+-- [False,True,False]
+
+-- |
+--     [True, False, True] & _                       %~ filter id
+-- >>> [True, False, True] & mapping (involuted not) %~ filter id
+-- [False]
+
+-- |
+--     (show ^. _                          ) 1234
+-- >>> (show ^. mapping reversed) 1234
+-- "4321"
+
+-- 2. Using the `enum` Iso provided by `lens`
+
+-- enum ∷ Enum a ⇒ Iso' Int a
+
+-- implement the following `intNot` function using `dimapping` in your implementation.
+
+intNot ∷ Int → Int
+intNot = fromEnum . not . toEnum
+
+intNot' ∷ Int → Int
+intNot' = not ^. dimapping enum (from enum)
+
+intNot'' ∷ Int → Int
+intNot'' = enum %~ not
+
+-- |
+-- >>> intNot 0
+-- 1
+
+-- |
+-- >>> intNot 1
+-- 0
+
+-- |
+-- intNot 2
+-- Prelude.Enum.Bool.toEnum: bad argument
+
 -----------------------
 -- Isos and Newtypes --
 -----------------------
@@ -6353,12 +6576,14 @@ textToYamlList' = T.pack . toYamlList . fmap T.unpack
 -- Coercing with Isos --
 ------------------------
 
+-- We know about newtypes that the newtype is exactly equivalent to the underlying representation.
+-- This means we have a trivial isomorphism between any type and any newtypes over that type.
+
 -- import Data.Coerce (coerce)
 -- :t coerce
-
 -- coerce ∷ Coercible a b ⇒ a → b
 
--- Coercible is a special constraint, it’s implemented for us by GHC for any newtype, we can use it even though it won’t show up in instance lists.
+-- Coercible is a special constraint, it's implemented for us by GHC for any newtype, we can use it even though it won't show up in instance lists.
 
 newtype Email = Email String
   deriving (Show)
@@ -6367,15 +6592,19 @@ newtype UserID = UserID String
   deriving (Show)
 
 -- Each of these types are representationally equal to Strings; the only difference is the type!
+-- We can use `coerce` to convert between them.
 
 -- |
--- We need to specify which type to coerce into
+-- We need to specify which type to coerce into.
 -- >>> coerce ("joe@example.com" ∷ String) ∷ Email
 -- Email "joe@example.com"
 
--- If two types are representationally equal we can even skip the middle-man and go directly between two newtypes:
+-- If two types are representationally equal we can even skip the middle-man and go directly between two newtypes.
 -- >>> coerce (Email "joe@example.com") ∷ UserID
 -- UserID "joe@example.com"
+
+-- `lens` provides a handy Iso for converting between newtypes called coerced.
+-- coerced ∷ (Coercible s a, Coercible t b) ⇒ Iso s t a b
 
 -- |
 -- >>> over coerced (reverse ∷ String → String) (Email "joe@example.com") ∷ Email
@@ -6386,20 +6615,21 @@ newtype UserID = UserID String
 -- >>> Email "joe@example.com" & (coerced ∷ Iso' Email String) . traversed %~ toUpper
 -- Email "JOE@EXAMPLE.COM"
 
--- using a little helper
+-- Using a little helper to avoid type annotations.
 email ∷ Iso' Email String
 email = coerced
 
 -- |
--- This is much better!
 -- >>> Email "joe@example.com" & email . traversed %~ toUpper
 -- Email "JOE@EXAMPLE.COM"
+
+-- `makeLenses` is smart enough to derive exactly this Iso if we define our newtype using record syntax.
 newtype Mail = Mail {_mail ∷ String}
   deriving (Show)
 
 makeLenses ''Mail
 
--- `makeLenses` will generate a mail iso which behaves just like the one we would have manually defined!
+-- `makeLenses` will generate a `mail` Iso which behaves just like the one we would have manually defined!
 
 -- |
 -- >>> Mail "joe@example.com" & mail . traversed %~ toUpper
@@ -6409,8 +6639,24 @@ makeLenses ''Mail
 -- Newtype Wrapper Isos --
 --------------------------
 
--- Alternative is to use `makeWrapped` which creates _Wrapped', _Unwrapped' and _Wrapping'.
--- makeWrapped ''Mail
+-- These isos are essentially restricted forms of coerced which only map between newtypes and their
+-- unwrapped form, they won't transitively map directly between different wrappers. This means
+-- they won't map between Email and UserID for instance. They also don't allow type-changing
+-- transformations. These restrictions mean they tend to result in much better type-inference.
+
+-- `makeWrapped` creates _Wrapped', _Unwrapped' and _Wrapping'.
+makeWrapped ''Mail
+
+-- |
+-- >>> Mail "joe@example.com" & _Wrapped' %~ reverse
+-- Mail {_mail = "moc.elpmaxe@eoj"}
+
+-- |
+-- >>> Mail "joe@example.com" & _Wrapping' Mail %~ reverse
+-- Mail {_mail = "moc.elpmaxe@eoj"}
+
+-- The author prefers to use an explicit Iso such as the one generated by `makeLenses`.
+-- But for types in base this can be convenient, e.g. `_Wrapping' Sum`.
 
 ----------
 -- Laws --
@@ -6420,17 +6666,19 @@ makeLenses ''Mail
 -- The One and Only Law: Reversibility --
 -----------------------------------------
 
+-- The one and only law of an iso is that we can completely reverse the transformation.
+
 -- myIso . from myIso == id
 -- from myIso . myIso == id
 
--- `id` is a valid optic which always focuses its whole argument, it’s a valid Iso as well!
+-- `id` is a valid optic which always focuses its whole argument. It is a valid Iso as well!
 
 -- |
--- >>> view (reversed . from reversed) ("Testing one two three")
+-- >>> view (reversed . from reversed) "Testing one two three"
 -- "Testing one two three"
 
 -- |
--- >>> view (from reversed . reversed) ("Testing one two three")
+-- >>> view (from reversed . reversed) "Testing one two three"
 -- "Testing one two three"
 
 -- |
@@ -6454,6 +6702,74 @@ myIso = negated . adding 10.0 . multiplying 372.0
 -- >>> view (from myIso . myIso) 23.0
 -- 23.000000000000227
 
+--------------------------
+-- Exercises - Iso Laws --
+--------------------------
+
+-- 1. The following Iso is unlawful. Provide a counter example which shows that it breaks the law!
+
+mapList' ∷ Ord k ⇒ Iso' (M.Map k v) [(k, v)]
+mapList' = iso M.toList M.fromList
+
+-- |
+-- >>> view (from mapList' . mapList') [(5, 5), (5, 5)]
+-- [(5,5)]
+
+-- |
+-- >>> view (mapList' . from mapList') $ M.fromList [(5, 5), (5, 5)]
+-- fromList [(5,5)]
+
+-- 2. Is there a lawful implementation of the following Iso? If so, implement it, if not, why not?
+
+nonEmptyList' ∷ Iso [a] [b] (Maybe (NE.NonEmpty a)) (Maybe (NE.NonEmpty b))
+nonEmptyList' = iso NE.nonEmpty (maybe [] NE.toList)
+
+-- 3. Is there a lawful implementation of an iso which sorts a list of elements? If so, implement it, if not, why not?
+
+-- No, there is no lawful implementation.
+
+-- |
+-- Sorted and unsorted lists are NOT identical. Ordering matters!
+-- >>> let l = [1,6,1,4,1,3,2,5]
+-- >>> l == sort l
+-- False
+
+-- 4. What about the following Iso which pairs each element with an Int which remembers its original position in the list.
+--    Is this a lawful Iso? Why or why not? If not, try to find a counter-example.
+
+sorted ∷ (Ord a) ⇒ Iso' [a] [(Int, a)]
+sorted = iso to from
+  where
+    to xs = sortOn snd $ zip [0 ..] xs
+    from xs = snd <$> sortOn fst xs
+
+-- This is a UNLAWFUIL Iso!
+
+-- |
+-- >>> view (sorted . from sorted) [1,6,1,4,1,3,2,5]
+-- [1,6,1,4,1,3,2,5]
+
+-- |
+-- >>> view (sorted . from sorted) []
+-- []
+
+-- |
+-- >>> sortOn snd $ zip [0 ..] [1,6,1,4,1,3,2,5]
+-- [(0,1),(2,1),(4,1),(6,2),(5,3),(3,4),(7,5),(1,6)]
+
+-- |
+-- >>> view (from sorted . sorted) [(0,1),(2,1),(4,1),(6,2),(5,3),(3,4),(7,5),(1,6)]
+-- [(0,1),(2,1),(4,1),(6,2),(5,3),(3,4),(7,5),(1,6)]
+
+-- |
+-- >>> view (from sorted . sorted) []
+-- []
+
+-- |
+-- But!!! The `to` function rezips the list.
+-- >>> [(9, 'a'), (8, 'b'), (7, 'c')] ^. from sorted . sorted
+-- [(2,'a'),(1,'b'),(0,'c')]
+
 --------------------------------------------------------------------------------------------
 --                                     Indexed Optics                                     --
 --------------------------------------------------------------------------------------------
@@ -6463,39 +6779,75 @@ myIso = negated . adding 10.0 . multiplying 372.0
 ------------------------------
 
 -- The basic idea of indexed optics is that they allow you to accumulate information about your current focus as you dive deeper into an optics path.
+-- This information could be anything that makes sense in the context of the optic.
+-- But it's commonly used with indexed structures to indicate the location you’re currently focusing on.
 
 -- |
+-- >>> ["Summer", "Fall", "Winter", "Spring"] ^.. traversed
+-- ["Summer","Fall","Winter","Spring"]
+
+-- |
+-- The itraversed traversal behaves identically to traversed, BUT it keeps track of the current index as it does so!
+-- We can use it in place of traversed without noticing any difference.
+-- >>> ["Summer", "Fall", "Winter", "Spring"] ^.. itraversed
+-- ["Summer","Fall","Winter","Spring"]
+
+-- |
+-- toListOf = flipped ^..
 -- >>> toListOf itraversed ["Summer", "Fall", "Winter", "Spring"]
 -- ["Summer","Fall","Winter","Spring"]
 
 -- |
+-- The magic happens when we start using indexed actions!
 -- >>> itoListOf itraversed ["Summer", "Fall", "Winter", "Spring"]
 -- [(0,"Summer"),(1,"Fall"),(2,"Winter"),(3,"Spring")]
 
--- action     | operator | indexed action | indexed operator
--- -----------+----------+----------------+------------------
--- toListOf   |   (^..)  |   itoListOf    |    (^@..)
--- over       |   (%∼)   |   iover        |    (%@∼)
--- traverseOf |   (%%∼)  |   itraverseOf  |    (%%@∼)
--- set        |   (.∼)   |   iset         |    (.@∼)
--- view       |   (^.)   |   iview        |    (^@.)
+-- itoListOf ∷ IndexedFold i s a → s → [(i, a)]
+-- It has an operator:
+-- (^@..) ∷ s → IndexedFold i s a → [(i, a)]
+
+-- It's very important to note that it's the action which adds the index to the result.
+-- The index isn't part of the focus of any optics in the path.
+-- We can compose optics together without worrying about passing the index manually.
+
+-- Try adding `@` in the middle of your favourite operators to get the indexed action.
+-- Every indexed action accepts an indexed optic.
+
+-- action     | operator | indexed action | indexed operator (@)
+-- -----------+----------+----------------+---------------------
+-- toListOf   |   (^..)  |   itoListOf    |        (^@..)
+-- over       |   (%∼)   |   iover        |        (%@∼)
+-- traverseOf |   (%%∼)  |   itraverseOf  |       (%%@∼)
+-- set        |   (.∼)   |   iset         |        (.@∼)
+-- view       |   (^.)   |   iview        |        (^@.)
+
+-- Behavior of `itraversed` for some different container types:
 
 -- |
--- The index type of maps is the key, so we can get a list of all elements and their key:
+-- Maps
+-- The index type of maps is the key, so we can get a list of all elements and their key.
 -- >>> let agenda = M.fromList [("Monday", "Shopping"), ("Tuesday", "Swimming")]
 -- >>> agenda ^@.. itraversed
 -- [("Monday","Shopping"),("Tuesday","Swimming")]
 
 -- |
--- The index type of tuples is the first half of the tuple:
+-- Tuples
+-- The index type of tuples is the first half of the tuple.
 -- >>> (True, "value") ^@.. itraversed
 -- [(True,"value")]
 
 -- |
+-- Trees
 -- The index type of trees is a list of int's which indicates their location in the tree.
 -- >>> let t = Node "top" [Node "left" [], Node "right" []]
 -- >>> t ^@.. itraversed
 -- [([],"top"),([0],"left"),([1],"right")]
+
+-----------------------
+-- Index Composition --
+-----------------------
+
+-- Indexes can compose alongside the optics, but it can be a bit less intuitive.
 
 -- |
 -- By default, the index of a path will be the index of the last optic in the path.
@@ -6504,8 +6856,8 @@ myIso = negated . adding 10.0 . multiplying 372.0
 -- [(0,"Shopping"),(1,"Yoga"),(0,"Brunch"),(1,"Food coma")]
 
 -- |
--- If we end the path with a non-indexed optic (like traverse) we’ll get an error:
--- When using with indexed actions make sure that your path has the type you expect and ends with an indexed optic!
+-- If we end the path with a non-indexed optic (like traverse) we'll get an error.
+-- When using indexed actions make sure that your path has the type you expect and ends with an indexed optic!
 -- let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
 -- agenda ^@.. itraversed . traverse
 -- Couldn't match type ‘Indexed i a (Const (Endo [(i, a)]) a)’
@@ -6517,9 +6869,9 @@ myIso = negated . adding 10.0 . multiplying 372.0
 --                → Const (Endo [(i, a)]) (Map [Char] [[Char]])
 
 -- index-aware composition operators:
---   • (<.): Use the index of the optic to the left
---   • (.>): Use the index of the optic to the right (This is how . already behaves)
---   • (<.>): Combine the indices of both sides as a tuple
+-- (<.)  → Use the index of the optic to the left.
+-- (.>)  → Use the index of the optic to the right. This is how (.) already behaves.
+-- (<.>) → Combine the indices of both sides as a tuple.
 
 -- |
 -- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
@@ -6537,14 +6889,28 @@ myIso = negated . adding 10.0 . multiplying 372.0
 -- This is a ridiculous thing to do, but it'll show how the indexes nest,
 -- We'll use an indexed traversal over the characters of each activity name:
 -- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
--- >>> agenda ^@.. itraversed <.> itraversed <.> itraversed
--- [(("Monday",(0,0)),'S'),(("Monday",(0,1)),'h'),(("Monday",(0,2)),'o'),(("Monday",(0,3)),'p'),(("Monday",(0,4)),'p'),(("Monday",(0,5)),'i'),(("Monday",(0,6)),'n'),(("Monday",(0,7)),'g'),(("Monday",(1,0)),'Y'),(("Monday",(1,1)),'o'),(("Monday",(1,2)),'g'),(("Monday",(1,3)),'a'),(("Saturday",(0,0)),'B'),(("Saturday",(0,1)),'r'),(("Saturday",(0,2)),'u'),(("Saturday",(0,3)),'n'),(("Saturday",(0,4)),'c'),(("Saturday",(0,5)),'h'),(("Saturday",(1,0)),'F'),(("Saturday",(1,1)),'o'),(("Saturday",(1,2)),'o'),(("Saturday",(1,3)),'d'),(("Saturday",(1,4)),' '),(("Saturday",(1,5)),'c'),(("Saturday",(1,6)),'o'),(("Saturday",(1,7)),'m'),(("Saturday",(1,8)),'a')]
+-- >>> take 4 $ agenda ^@.. itraversed <.> itraversed <.> itraversed
+-- [(("Monday",(0,0)),'S'),(("Monday",(0,1)),'h'),(("Monday",(0,2)),'o'),(("Monday",(0,3)),'p')]
+
+-- |
+-- >>> let agenda = M.fromList [ ("Monday" , ["Shopping", "Yoga"]) , ("Saturday", ["Brunch", "Food coma"]) ]
+-- >>> take 4 $ agenda ^@.. itraversed . itraversed . itraversed
+-- [(0,'S'),(1,'h'),(2,'o'),(3,'p')]
 
 ------------------------------
 -- Custom Index Composition --
 ------------------------------
 
--- We could use `icompose` to append the list index to the day of the week as a string:
+-- `icompose` composes any two indexed optics into a new indexed optic by combining the indexes together with a user-defined function.
+
+-- Simplified signature; `IndexedOptic` doesn't exist;
+-- it's a stand-in for any of the indexed optic types.
+-- icompose ∷ (i → j → k) →
+--            IndexedOptic i s t a b →
+--            IndexedOptic j a b c d →
+--            IndexedOptic k s t c d
+
+-- We could use `icompose` to append the list index to the day of the week as a string.
 showDayAndNumber ∷ String → Int → String
 showDayAndNumber a b = a <> ": " <> show b
 
@@ -6553,9 +6919,12 @@ showDayAndNumber a b = a <> ": " <> show b
 -- >>> agenda ^@.. icompose showDayAndNumber itraversed itraversed
 -- [("Monday: 0","Shopping"),("Monday: 1","Yoga"),("Saturday: 0","Brunch"),("Saturday: 1","Food coma")]
 
--- Let's define a custom optics composition operator that will automatically append String indices with a comma separator.
+-- This can be a bit clunky, a custom operator might help.
 (.++) ∷ (Indexed String s t → r) → (Indexed String a b → s → t) → Indexed String a b → r
 (.++) = icompose (\a b → a ++ ", " ++ b)
+
+-- The hardest part about writing these custom operators is figuring out their type!
+-- You can leave the type signature off and simply use the operator in an expression, then ask GHCi or the language server for the type!
 
 populationMap ∷ Map String (Map String Int)
 populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto", 2930000)]), ("Germany", M.fromList [("Berlin", 3748000), ("Munich", 1456000)])]
@@ -6564,9 +6933,61 @@ populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto
 -- >>> populationMap ^@.. itraversed .++ itraversed
 -- [("Canada, Ottawa",994837),("Canada, Toronto",2930000),("Germany, Berlin",3748000),("Germany, Munich",1456000)]
 
+--------------------------------
+-- Exercises - Indexed Optics --
+--------------------------------
+
+-- 1. Fill in the blanks!
+
+-- |
+--     M.fromList [("streamResponse", False), ("useSSL", True)] _    itraversed
+-- >>> M.fromList [("streamResponse", False), ("useSSL", True)] ^@.. itraversed
+-- [("streamResponse",False),("useSSL",True)]
+
+-- |
+--     (M.fromList [('a', 1), ('b', 2)], M.fromList [('c', 3), ('d', 4)]) ^@.. _
+-- >>> (M.fromList [('a', 1), ('b', 2)], M.fromList [('c', 3), ('d', 4)]) ^@.. both . itraversed
+-- [('a',1),('b',2),('c',3),('d',4)]
+
+-- |
+--     M.fromList [('a', (True, 1)), ('b', (False, 2))] ^@.. itraversed _  _1
+-- >>> M.fromList [('a', (True, 1)), ('b', (False, 2))] ^@.. itraversed <. _1
+-- [('a',True),('b',False)]
+
+-- |
+--     [ M.fromList [("Tulips", 5), ("Roses", 3)] , M.fromList [("Goldfish", 11), ("Frogs", 8)] ] ^@.. _
+-- >>> [ M.fromList [("Tulips", 5), ("Roses", 3)] , M.fromList [("Goldfish", 11), ("Frogs", 8)] ] ^@.. itraversed <.> itraversed
+-- [((0,"Roses"),3),((0,"Tulips"),5),((1,"Frogs"),8),((1,"Goldfish"),11)]
+
+-- |
+--     [10, 20, 30] & itraversed _   (+)
+-- >>> [10, 20, 30] & itraversed %@~ (+)
+-- [10,21,32]
+
+-- |
+-- _            itraversed (\i s → putStrLn (replicate i ' ' <> s)) ["one", "two", "three"]
+-- itraverseOf_ itraversed (\i s → putStrLn (replicate i ' ' <> s)) ["one", "two", "three"]
+
+-- Check this in the repl!
+-- one
+--  two
+--   three
+
+-- |
+-- itraverseOf_ itraversed (\n s → putStrLn _                    ) ["Go shopping", "Eat lunch", "Take a nap"]
+-- itraverseOf_ itraversed (\n s → putStrLn (show n <> ": " <> s)) ["Go shopping", "Eat lunch", "Take a nap"]
+
+-- Check this in the repl!
+-- 0: Go shopping
+-- 1: Eat lunch
+-- 2: Take a nap
+
 ------------------------
 -- Filtering by Index --
 ------------------------
+
+-- We can use `indices` to narrow down the focuses using a predicate on the index of our fold or traversal!
+-- You simply give it a predicate to run on the index and it'll ignore any focuses that don't match.
 
 -- |
 -- Get list elements with an 'even' list-index:
@@ -6578,8 +6999,10 @@ populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto
 -- >>> ratings ^.. itraversed . indices (has (prefixed "Dark"))
 -- [94,87]
 
--- |
+-- If we want to be more specific we can target an exact index using the `index` filter.
 -- `index` works similarly to `indices`, but ignores any focus that doesn't have the exact index you specify.
+
+-- |
 -- >>> ['a'..'z'] ^? itraversed . index 10
 -- Just 'k'
 
@@ -6587,6 +7010,75 @@ populationMap = M.fromList [("Canada", M.fromList [("Ottawa", 994837), ("Toronto
 -- >>> let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87) , ("Death of Superman", 92)]
 -- >>> ratings ^? itraversed . index "Death of Superman"
 -- Just 92
+
+-------------------------------
+-- Exercises - Index Filters --
+-------------------------------
+
+-- 1. Given the following exercise schedule:
+
+exercises ∷ M.Map String (M.Map String Int)
+exercises =
+  M.fromList
+    [ ("Monday" {-   -}, M.fromList [("pushups", 10), ("crunches", 20)]),
+      ("Wednesday" {--}, M.fromList [("pushups", 15), ("handstands", 3)]),
+      ("Friday" {-   -}, M.fromList [("crunches", 25), ("handstands", 5)])
+    ]
+
+
+-- a) Compute the total number of crunches you should do this week.
+
+-- |
+-- >>> sumOf (traversed . itraversed . index "crunches") exercises
+-- 45
+
+-- b) Compute the number of reps you need to do across all exercise types on Wednesday.
+
+-- |
+-- >>> sumOf (itraversed . index "Wednesday" . traversed) exercises
+-- 18
+
+-- c) List out the number of pushups you need to do each day, you can use `ix` to help this time if you wish.
+
+-- |
+-- >>> exercises ^@.. itraversed <. itraversed . index "pushups"
+-- [("Monday",10),("Wednesday",15)]
+
+-- |
+-- >>> exercises ^@.. itraversed <. ix "pushups"
+-- [("Monday",10),("Wednesday",15)]
+
+-- 2. Given the following board:
+
+board =
+  [ "XOO",
+    ".XO",
+    "X.."
+  ]
+
+-- a) Generate a list of positions alongside their (row, column) coordinates.
+
+-- |
+-- >>> board ^@.. itraversed <.> itraversed
+-- [((0,0),'X'),((0,1),'O'),((0,2),'O'),((1,0),'.'),((1,1),'X'),((1,2),'O'),((2,0),'X'),((2,1),'.'),((2,2),'.')]
+
+-- b) Set the empty square at (1, 0) to an 'X'. HINT: When using the custom composition operators you'll often need to introduce parenthesis to get the right precedence.
+
+-- |
+-- >>> board & (itraversed <.> itraversed) . index (1, 0) .~ 'X'
+-- ["XOO","XXO","X.."]
+
+-- c) Get the 2nd column as a list (e.g. "OX."). Try to do it using `index` instead of `indices`!
+
+-- |
+-- >>> board ^.. traversed . itraversed . index 1
+-- "OX."
+
+-- d) Get the 3rd row as a list (e.g. "X.."). Try to do it using `index` instead of `indices`! HINT: The precedence for this one can be tricky too.
+
+-- |
+-- >>> board ^.. (itraversed <. traverse) . index 2
+-- "X.."
 
 ---------------------------
 -- Custom Indexed Optics --
@@ -6601,9 +7093,11 @@ data Board a
       a a a
   deriving (Show, Foldable)
 
+-- Individual squares in our grid be represented as X-Y coordinates of Positions.
 data Position = I | II | III
   deriving (Show, Eq, Ord)
 
+-- a sample board won by X
 testBoard ∷ Board Char
 testBoard =
   Board
@@ -6617,28 +7111,56 @@ testBoard =
 -- Custom IndexedFolds --
 -------------------------
 
--- Use a list comprehension to get the list of all coordinate pairs
--- in the correct order, then zip them with all the slots in our board
+-- Normally we'd build a custom fold with `folding`.
+-- So to build an IndexedFold we can use `ifolding`.
+
+-- simple signature
+-- ifolding ∷ Foldable f ⇒ (s → f (i, a)) → IndexedFold i s a
+
+-- We simply have to project our focuses from the structure into a foldable container (e.g. a list).
+-- The difference from `folding` is that we also provide an index of type `i` alongside each value.
+
+-- Use a list comprehension to get the list of all coordinate pairs in the correct order, then zip them with all the slots in our board.
 slotsFold ∷ IndexedFold (Position, Position) (Board a) a
-slotsFold = ifolding $ \board → zip [(x, y) | y ← [I, II, III], x ← [I, II, III]] (toList board)
+slotsFold = ifolding $ zip [(x, y) | y ← [I, II, III], x ← [I, II, III]] . toList
+
+-- |
+-- column-first ordering
+-- >>> [(x, y) | y ← [I, II, III], x ← [I, II, III]]
+-- [(I,I),(II,I),(III,I),(I,II),(II,II),(III,II),(I,III),(II,III),(III,III)]
 
 -- |
 -- >>> testBoard ^@.. slotsFold
 -- [((I,I),'X'),((II,I),'O'),((III,I),'X'),((I,II),'.'),((II,II),'X'),((III,II),'O'),((I,III),'.'),((II,III),'O'),((III,III),'X')]
 
 -- |
--- Filter indices where the Y coord is 'II'
+-- filter indices where the Y coord is 'II' → row
 -- >>> testBoard ^@.. slotsFold . indices ((== II) . snd)
 -- [((I,II),'.'),((II,II),'X'),((III,II),'O')]
+
+-- |
+-- filter indices where the X coord is 'II' → column
+-- >>> testBoard ^@.. slotsFold . indices ((== II) . fst)
+-- [((II,I),'O'),((II,II),'X'),((II,III),'O')]
 
 ------------------------------
 -- Custom IndexedTraversals --
 ------------------------------
 
+-- I'd recommend implementing the Ixed typeclass so that we can use `ix` to access particular slots.
+-- But I show you how to do it by building an IndexedTraversal.
+
+-- Unfortunately, there isn't a helper method for building custom Traversals.
+-- Just like regular Traversals we have to do this by hand.
+
 {- ORMOLU_DISABLE -}
 
--- I define a polymorphic indexed traversal
--- with a tuple of positions as the index:
+-- We define an IndexedTraversal just like a regular Traversal.
+-- The only difference is that we use the `indexed` function to pass an index to the handler each time we use it.
+-- Typically you can write a normal traversal, then just sprinkle `indexed` around wherever you call your handler,
+-- pass in the index alongside each value, and everything works out.
+
+-- Definition of a polymorphic indexed traversal with a tuple of positions as the index.
 slotsTraversal ∷ IndexedTraversal (Position, Position) (Board a) (Board b) a b
 slotsTraversal p (Board a1 b1 c1
                         a2 b2 c2
@@ -6656,15 +7178,24 @@ slotsTraversal p (Board a1 b1 c1
 
 {- ORMOLU_ENABLE -}
 
+-- Actually, our `slotsTraversal` makes the `slotsFold` redundant, since every traversal is also a fold.
+
 -- |
 -- Every traversal is also a fold.
 -- >>> testBoard ^@.. slotsTraversal
 -- [((I,I),'X'),((II,I),'O'),((III,I),'X'),((I,II),'.'),((II,II),'X'),((III,II),'O'),((I,III),'.'),((II,III),'O'),((III,III),'X')]
 
+-- With Traversals we can also set and modify slots.
+
 -- |
 -- Setting the whole second row to 'O'.
 -- >>> testBoard & slotsTraversal . indices ((== II) . snd) .~ 'O'
 -- Board 'X' 'O' 'X' 'O' 'O' 'O' '.' 'O' 'X'
+
+-- |
+-- Setting the whole second column to 'O'.
+-- >>> testBoard & slotsTraversal . indices ((== II) . fst) .~ 'O'
+-- Board 'X' 'O' 'X' '.' 'O' 'O' '.' 'O' 'X'
 
 -- We pass the coordinates to our printing function so we can easily add newlines in the right spots!
 printBoard ∷ Board Char → IO ()
@@ -6679,47 +7210,122 @@ printBoard = itraverseOf_ slotsTraversal printSlot
 -- .XO
 -- .OX
 
--- You can also write an indexed lens using the ilens helper; unlike the others it’s pretty straight-forward:
+-- You can also write an indexed lens using the `ilens` helper; unlike the others it's pretty straight-forward.
 --
 -- ilens ∷ (s → (i, a)) → (s → b → t) → IndexedLens i s t a b
 --
--- You simply provide the index type alongside the focus in your getter and ilens will wire it up correctly!
+-- You simply provide the index type alongside the focus in your getter and `ilens` will wire it up correctly!
 
 -------------------
 -- Index Helpers --
 -------------------
 
 -- |
--- The indexing helper takes a normal optic and simply adds a numeric index alongside its elements.
+-- The `indexing` helper takes a normal optic and simply adds a numeric index alongside its elements.
 -- ("hello" ∷ Text) ^@.. indexing each
 -- [(0,'h'),(1,'e'),(2,'l'),(3,'l'),(4,'o')]
 
 -- |
--- We can re-map or edit the indexes of an optic using reindexed:
 -- >>> ['a'..'c'] ^@.. itraversed
 -- [(0,'a'),(1,'b'),(2,'c')]
 
 -- |
--- >>> ['a'..'c'] ^@.. reindexed (*10) itraversed
+-- We can re-map or edit the indexes of an optic using `reindexed`.
+-- >>> ['a'..'c'] ^@.. reindexed (* 10) itraversed
 -- [(0,'a'),(10,'b'),(20,'c')]
 
 -- |
--- We can even change index types!
+-- We can change index types!
 -- >>> ['a'..'c'] ^@.. reindexed show itraversed
 -- [("0",'a'),("1",'b'),("2",'c')]
 
 -- `selfIndex` can be injected into a path to set the index of the path to the current value.
 
 -- |
--- `selfIndex` copies a snapshot of the current focus into the index
+-- >>> [("Betty", 37), ("Veronica", 12)] ^@.. itraversed
+-- [(0,("Betty",37)),(1,("Veronica",12))]
+
+-- |
+-- >>> [("Betty", 37), ("Veronica", 12)] ^@.. itraversed <. _2
+-- [(0,37),(1,12)]
+
+-- |
+-- `selfIndex` copies a snapshot of the current focus into the index.
+-- Useful when you need context from higher up in the structure to do some edits lower down.
 -- >>> [("Betty", 37), ("Veronica", 12)] ^@.. itraversed . selfIndex <. _2
 -- [(("Betty",37),37),(("Veronica",12),12)]
+
+---------------------------------------
+-- Exercises - Custom Indexed Optics --
+---------------------------------------
+
+-- 1. Write a sensible implementation for the following indexed fold!
+
+pair ∷ IndexedFold Bool (a, a) a
+pair = ifolding (\(x, y) → [(False, x), (True, y)])
+
+-- Such that:
+
+-- |
+-- >>> ('a', 'b') ^@.. pair
+-- [(False,'a'),(True,'b')]
+
+-- Once you’ve done that; try writing it as an indexed traversal!
+
+pair' ∷ IndexedTraversal Bool (a, a) (b, b) a b
+pair' p (x, y) = (,) <$> indexed p False x <*> indexed p True y
+
+-- |
+-- >>> ('a', 'b') ^@.. pair'
+-- [(False,'a'),(True,'b')]
+
+-- 2. Use `reindexed` to provide an indexed list traversal which starts at `1` instead of `0`.
+
+-- We can change index types!
+-- >>> ['a'..'c'] ^@.. reindexed show itraversed
+-- [("0",'a'),("1",'b'),("2",'c')]
+
+oneIndexed ∷ IndexedTraversal Int [a] [b] a b
+oneIndexed = reindexed (+ 1) traversed
+
+-- It should behave like so:
+
+-- |
+-- >>> ['a'..'d'] ^@.. oneIndexed
+-- [(1,'a'),(2,'b'),(3,'c'),(4,'d')]
+
+-- If you want a challenge, try using selfIndex, <.> and `reindexed` to write a traversal indexed by the distance to the end of the list. e.g.
+
+invertedIndex ∷ IndexedTraversal Int [a] [b] a b
+invertedIndex = reindexed (\(l, i) → length l - i - 1) (selfIndex <.> itraversed)
+
+-- |
+-- >>> ['a'..'d'] ^@.. invertedIndex
+-- [(3,'a'),(2,'b'),(1,'c'),(0,'d')]
+
+-- 3. Build the following combinators using only compositions of other optics:
+
+chars ∷ IndexedTraversal Int Text Text Char Char
+chars = indexing each
+
+-- |
+-- ("banana" ∷ Text) ^@.. chars
+-- [(0,'b'),(1,'a'),(2,'n'),(3,'a'),(4,'n'),(5,'a')]
+
+-- This one's a thinker; index each character (except newlines) by their line and column numbers:
+
+charCoords ∷ IndexedTraversal (Int, Int) String String Char Char
+charCoords = lined <.> itraversed
+
+-- |
+-- >>> "line\nby\nline" ^@.. charCoords
+-- [((0,0),'l'),((0,1),'i'),((0,2),'n'),((0,3),'e'),((1,0),'b'),((1,1),'y'),((2,0),'l'),((2,1),'i'),((2,2),'n'),((2,3),'e')]
 
 -----------------------------
 -- Index-Preserving Optics --
 -----------------------------
 
--- Index preserving optics are just regular optics which pass-through any existing index in the path.
+-- Index preserving optics are just regular optics which pass-through any existing index in the path AUTOMATICALLY.
 
 -- |
 -- This one won't compile!
@@ -6732,18 +7338,26 @@ printBoard = itraverseOf_ slotsTraversal printSlot
 --                → [(Char, Bool)] → Const (Endo [(i, a)]) [(Char, Bool)]
 
 -- |
--- However, we can turn `_1` into an index preserving lens!
--- Now the index 'passes-through' `_1'` to the end.
+-- We can use explicit index composition operators.
+-- >>> [('a', True), ('b', False), ('c', True)] ^@.. itraversed <. _1
+-- [(0,'a'),(1,'b'),(2,'c')]
+
+-- |
+-- However, we can turn `_1` into an index preserving lens with e.g. `cloneIndexPreservingLens`!
+-- Now the index 'passes-through' `_1'` to the end AUTOMATICALLY.
 -- >>> let _1' = cloneIndexPreservingLens _1
 -- >>> [('a', True), ('b', False), ('c', True)] ^@.. itraversed . _1'
 -- [(0,'a'),(1,'b'),(2,'c')]
 
--- |
--- The previous is equivalent to use explicit index passing with `<.`
--- >>> [('a', True), ('b', False), ('c', True)] ^@.. itraversed <. _1
--- [(0,'a'),(1,'b'),(2,'c')]
+-- Obviously in this case it's quicker, easier, and clearer to just use (<.).
+-- But if you’re exporting lenses for a library it can be helpful to know about this trick.
 
 -- cloneIndexPreserving* methods: `cloneIndexPreservingLens`, `cloneIndexPreservingTraversal`, `cloneIndexPreservingSetter`
+-- Unfortunately, there is no `cloneIndexPreservingFold`!
+
+-- cloneIndexPreservingLens      ∷ Lens s t a b      → IndexPreservingLens s t a b
+-- cloneIndexPreservingTraversal ∷ Traversal s t a b → IndexPreservingTraversal s t a b
+-- cloneIndexPreservingSetter    ∷ Setter s t a b    → IndexPreservingSetter s t a b
 
 -- `iplens` is identical to `lens` except the resulting lens will be index-preserving.
 -- iplens ∷ (s → a) → (s → b → t) → IndexPreservingLens s t a b
