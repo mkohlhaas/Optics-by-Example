@@ -7366,7 +7366,122 @@ charCoords = lined <.> itraversed
 --                                 Dealing with Type Errors                               --
 --------------------------------------------------------------------------------------------
 
--- no sample code
+----------------------------------------
+-- Interpreting expanded optics types --
+----------------------------------------
+
+-- |
+-- [(1, True), (2, False), (3, True)] & folded . _1 *~ 10
+-- Could not deduce (Contravariant Identity)
+--   arising from a use of ‘folded’
+-- from the context: Num a
+--   bound by the inferred type of it ∷ Num a ⇒ [(a, Bool)]
+--   at /home/schmidh/Gitrepos/Optics-by-Example-Exercises/app/Main.hs:7369:2-55
+
+-- |
+-- >>> [(1, True), (2, False), (3, True)] & traversed . _1 *~ 10
+-- [(10,True),(20,False),(30,True)]
+
+----------------------
+-- Type Error Arena --
+----------------------
+
+---------------------------------
+-- First Foe: Level 1 Lenslion --
+---------------------------------
+
+-- |
+-- >>> view _1 ('a', 2)
+-- 'a'
+
+-----------------------
+-- Level 2 Tuplicant --
+-----------------------
+
+-- |
+-- view ("abc", 123) _1
+-- Couldn't match type ‘([Char], b0)’
+--                with ‘(t → Const t t)
+--                      → ((a0 → f0 b1) → s0 → f0 t0)
+--                      → Const t ((a0 → f0 b1) → s0 → f0 t0)’
+-- Expected type: Getting t ((a0 → f0 b1) → s0 → f0 t0) t
+--   Actual type: ([Char], b0)
+
+-- |
+-- >>> view _1 ("abc", 123)
+-- "abc"
+
+-------------------------
+-- Level 3 Settersiren --
+-------------------------
+
+-- |
+-- ("old", False) $ _1 .~ "new"
+-- Couldn't match expected type ‘(s0 → t0) → t’
+--             with actual type ‘([Char], Bool)’
+
+-- |
+-- >>> ("old", False) & _1 .~ "new"
+-- ("new",False)
+
+-------------------------
+-- Level 4 Composicore --
+-------------------------
+
+-- |
+-- view (_3 . _1) (('a', 'b', 'c'), 'd')
+-- No instance for (Field3
+--                    ((Char, Char, Char), Char) ((Char, Char, Char), Char) a0 b0)
+--   arising from a use of ‘it’
+
+-- |
+-- >>> view (_1 . _3) (('a', 'b', 'c'), 'd')
+-- 'c'
+
+-------------------------
+-- Level 5 Foldasaurus --
+-------------------------
+
+-- |
+-- ("blue", Just (2 ∷ Int)) ^. _2 . _Just
+-- No instance for (Monoid Int) arising from a use of ‘_Just’
+
+-- |
+-- >>> ("blue", Just (2 ∷ Int)) ^? _2 . _Just
+-- Just 2
+
+-- |
+-- >>> ("blue", Just (2 ∷ Int)) ^? _2
+-- Just (Just 2)
+
+--------------------------------
+-- Level 6 Higher Order Beast --
+--------------------------------
+
+-- |
+-- ['a'..'z'] ^.. taking 5 . folded
+-- Couldn't match type ‘[]’ with ‘p a’
+-- Expected type: Getting
+--                  (Endo [BazaarT p f a a a]) [Char] (BazaarT p f a a a)
+--   Actual type: (BazaarT p f a a a → s0 → BazaarT p f a a a)
+--                → Over p f s0 (BazaarT p f a a a) a a
+
+-- |
+-- >>> ['a'..'z'] ^.. taking 5 folded
+-- "abcde"
+
+--------------------------
+-- Level 7 Traversacula --
+--------------------------
+
+-- |
+-- over both putStrLn ("one", "two")
+-- No instance for (Show (IO ())) arising from a use of ‘evalPrint’
+
+-- |
+-- traverseOf_ both putStrLn ("one", "two")
+-- one
+-- two
 
 --------------------------------------------------------------------------------------------
 --                                    Optics and Monads                                   --
@@ -7387,17 +7502,20 @@ data Env = Env
 
 makeLenses ''Env
 
+-- using standard monad stack API
 printUser ∷ ReaderT Env IO ()
 printUser = do
   user ← asks _currentUser
   liftIO . putStrLn $ "Current user: " <> user
 
--- The equivalent lensy version uses `view` like this.
--- This is actually the exact same view function we're used to using with lenses!
+-- The equivalent lensy version just uses `view`.
+-- This is actually the exact same `view` function we're used to using with lenses!
 printUser' ∷ ReaderT Env IO ()
 printUser' = do
   user ← view currentUser
   liftIO . putStrLn $ "Current user: " <> user
+
+-- See `main` function for application!
 
 -- `preview` works the same way!
 getUserPassword ∷ ReaderT Env IO ()
@@ -7406,7 +7524,7 @@ getUserPassword = do
   maybePassword ← preview (users . ix userName)
   liftIO $ print maybePassword
 
--- see main function for application!
+-- Using `view` is the idiomatic way of accessing your environment if you've got lenses defined for your environment.
 
 -----------------------------
 -- State Monad Combinators --
@@ -7421,7 +7539,7 @@ data Till = Till
 
 makeLenses ''Till
 
--- Almost ALL setter combinators have State equivalents which simply replace the `∼` with an `=`!
+-- Almost ALL setter combinators have State equivalents which simply replace the `∼` with an `=`, e.g `.~` becomes `.=`!
 
 saleCalculation ∷ StateT Till IO ()
 saleCalculation = do
@@ -7455,15 +7573,19 @@ makeLenses ''Weather
 
 printData ∷ String → ReaderT Float IO ()
 printData statName = do
-  num ← ask
+  num ← ask -- `num` can be any Float from any lens, e.g. `temp` and `pressure`.
   liftIO . putStrLn $ statName <> ": " <> show num
+
+-- `magnify` is used for Reader monads.
+-- magnify ∷ Lens' s a → ReaderT a m r → ReaderT s m r
 
 weatherStats ∷ ReaderT Weather IO ()
 weatherStats = do
   magnify temp (printData "temp") -- `magnify` et. al. allow us to ‘re-scope’ a Reader or State monad to a portion of the type focused by a lens.
-  magnify pressure (printData "pressure")
+  magnify pressure (printData "pressure") -- `temp` and `pressure` can use the same function (`printData`).
 
 -- |
+-- By magnifying the Reader environment through a lens which focuses a Float we can run `printData` against that particular stat!
 -- runReaderT weatherStats (Weather 15 7.2)
 -- temp: 15.0
 -- pressure: 7.2
@@ -7471,6 +7593,9 @@ weatherStats = do
 -- a State action which runs against our Weather object
 convertCelsiusToFahrenheit ∷ StateT Float IO ()
 convertCelsiusToFahrenheit = modify (\celsius → (celsius * (9 / 5)) + 32)
+
+-- `zoom` is used for State monads.
+-- zoom ∷ Monad m ⇒ Lens' s a → StateT a m r → StateT s m r
 
 -- In order to run it in a State monad over the Weather type we'll need to zoom-in on the temperature when we run it.
 weatherStats' ∷ StateT Weather IO ()
