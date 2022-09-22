@@ -7,6 +7,8 @@ import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
 import Control.Monad.State
+import DB
+import DBClassy
 import Data.Bits.Lens (bitAt)
 import Data.ByteString (ByteString)
 import Data.Char (isAlpha, isNumber, isUpper, toLower, toUpper)
@@ -14,7 +16,7 @@ import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
 import Data.Function (on)
-import Data.List (intercalate, nub, sort, sortOn, stripPrefix, transpose, elemIndex)
+import Data.List (elemIndex, intercalate, nub, sort, sortOn, stripPrefix, transpose)
 import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -26,6 +28,7 @@ import qualified Data.Set as S
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Tree (Tree (Node))
+import Init
 import Numeric.Lens (adding, dividing, multiplying, negated)
 import Text.Printf (printf)
 
@@ -7025,7 +7028,6 @@ exercises =
       ("Friday" {-   -}, M.fromList [("crunches", 25), ("handstands", 5)])
     ]
 
-
 -- a) Compute the total number of crunches you should do this week.
 
 -- |
@@ -7616,14 +7618,14 @@ weatherStats' = zoom temp convertCelsiusToFahrenheit
 -- Classy lenses aren't really a new type of optic so much as a whole DESIGN PATTERN.
 
 --------------------------------
--- No duplicate record fields --
+-- No Duplicate Record Fields --
 --------------------------------
 
--- A consistent annoyance in Haskell is that you can’t have two records with the same field names.
+-- In Haskell we can't have two records with the same field names!
 -- Classy lenses provide an (imperfect) solution for this.
 
 -- If we have several records which all have a `name` field, we need to disambiguate the fields.
--- The idiom is to use record name as a field prefix.
+-- Idiomatically we use the record name as a field prefix.
 newtype Persona = Persona
   { _personaName ∷ String
   }
@@ -7634,8 +7636,8 @@ newtype Pet = Pet
   }
   deriving (Show)
 
--- Not only is this annoyingly verbose, but there's a greater problem in Haskell as a whole:
---   we can't write code which is polymorphic over record fields!
+-- Not only is this annoyingly verbose, but there's a greater problem in Haskell as a whole.
+-- We can't write code which is polymorphic over record fields!
 -- If we want to print a record's name, we need a separate method for each record type.
 
 greetPerson ∷ Persona → String
@@ -7652,8 +7654,8 @@ greetPet p = "Hello " <> _petName p <> "!"
 -- >>> greetPet (Pet "Hobbes")
 -- "Hello Hobbes!"
 
--- We can use `makeFields` to generate record-polymorphic lenses for all the fields.
-
+-- We can use `makeFields` to generate record-polymorphic lenses for all the fields which have been defined in the idiomatic way,
+-- i.e. with record name as a field prefix.
 makeFields ''Persona
 makeFields ''Pet
 
@@ -7705,6 +7707,19 @@ initialize = do
   host ← view hostName
   liftIO $ putStrLn ("initializing server at: " <> host <> ":" <> show port)
 
+-- The code is functional, and doesn't have any problems per se.
+-- But both initialize and connectDB depend directly on Env, and presumably so does EVERY action in our entire code-base that pulls config from the environment.
+-- This means that we've set a very rigid dependency on our Env type, if that type changes significantly we'll have to fix code across our entire app!
+
+-- type DatabaseUrl = String
+
+-- Change the environment of connectDB to only the piece it needs (the DatabaseUrl).
+-- Then we manually run the reader layer with the correct piece in `main`.
+connectDB' ∷ (MonadIO m, MonadReader DatabaseUrl m) ⇒ m ()
+connectDB' = do
+  url ← ask
+  liftIO $ putStrLn ("connecting to db at: " <> url)
+
 main ∷ IO ()
 main = do
   runReaderT printUser (Env "jenkins" (M.singleton "jenkins" "hunter2"))
@@ -7714,28 +7729,97 @@ main = do
   flip runReaderT (DataDBEnv 8000 "example.com" "db.example.com") $ do
     initialize
     connectDB
+  -- This is messy, and also requires you to know your full monad stack.
+  -- This is a definite anti-pattern in MTL style and not a viable option!
+  flip runReaderT (DataDBEnv 8000 "example.com" "db.example.com") $ do
+    initialize
+    ask >>= \e → runReaderT connectDB' (_databaseUrl e)
+  -- The magnify combinator can help a little with this situation. But we still need to do better.
+  flip runReaderT (DataDBEnv 8000 "example.com" "db.example.com") $ do
+    initialize
+    magnify databaseUrl connectDB'
+  -- Using `makeFields` cleans this up. See next paragraph for details, app/DB.hs and app/Init.hs files.
+  flip runReaderT (EnvDb 8000 "example.com" "db.example.com") $ do
+    initialisieren
+    connectDatenbank
 
 ---------------------------------------------
 -- Granular Dependencies with `makeFields` --
 ---------------------------------------------
 
--- In case of a monad stack with a Reader this design pattern will make it much more handy.
--- See pages 282-284 for the actual code. Very helpful and interesting!
+data EnvDb = EnvDb
+  { _envDbPNumber ∷ Int,
+    _envDbHName ∷ String,
+    _envDbDatenbankUrl ∷ DatabaseUrl
+  }
+  deriving (Show)
+
+-- Because we imported the DB module, `makeFields` won't define a new HasDatenbankUrl class from the `_envDbDatenbankUrl` field.
+makeFields ''EnvDb
 
 --------------------------------
 -- Field Requirements Compose --
 --------------------------------
 
--- A benefit of field typeclasses is that they’re specified with constraints, and constraints compose!
--- This means that if we want to accept a record with multiple specific fields we can do so easily by
--- just adding multiple Has* constraints.
-
--- See pages 284-285.
+-- See app/Init.hs
 
 ----------------------------------
 -- `makeFields` vs `makeClassy` --
 ----------------------------------
 
--- There are a half-dozen different ways to generate lenses using TemplateHaskell so you'd certainly be forgiven for getting them confused.
+data People = People
+  { _personName ∷ String,
+    _favouriteFood ∷ String
+  }
+  deriving (Show)
 
--- See pages 285-289 outlines the differences between `makeFields` and `makeClassy`.
+-- makeFieldsNoPrefix ''People
+-- generates:
+-- class HasPersonName s a | s → a where
+--   personName ∷ Lens' s a
+-- class HasFavouriteFood s a | s → a where
+--   favouriteFood ∷ Lens' s a
+
+makeClassy ''People
+
+-- generates:
+-- class HasPeople c where
+--   people ∷ Lens' c People
+--   favouriteFood ∷ Lens' c String
+--   personName ∷ Lens' c String
+
+-- The key difference between these styles is that makeClassy is a bit less granular.
+-- It effectively allows you to specify that a type has a Person nested within it somewhere.
+
+-- Refactoring our Database Config example (see app/DBClassy.hs)
+newtype EnvClassy = EnvClassy {_envDbConfig ∷ DbConfig} deriving (Show)
+
+-- Instead of using `makeFields` or `makeClassy`, we can go back to our roots with makeLenses.
+makeLenses ''EnvClassy
+
+-- Creates the following lens:
+-- envDbConfig ∷ Iso' Env DbConfig
+
+-- We have to write an instance for HasDbConfig which specifies where in our record to find the DbConfig.
+-- We're just delegating to the lens we generated with `makeLenses`.
+instance HasDbConfig EnvClassy where
+  dbConfig = envDbConfig
+
+-- |
+-- >>> let env = EnvClassy (DbConfig "dbAdmin" 100)
+-- >>> env ^. databaseUser
+-- "dbAdmin"
+
+-- |
+-- >>> let env = EnvClassy (DbConfig "dbAdmin" 100)
+-- >>> env ^. maxConnections
+-- 100
+
+-- |
+-- >>> let env = EnvClassy (DbConfig "dbAdmin" 100)
+-- >>> env ^. dbConfig
+-- DbConfig {_databaseUser = "dbAdmin", _maxConnections = 100}
+
+-- `makeFields` is more helpful for reducing the annoyances of records with shared names and for implementing field-polymorphic functions.
+--  Whereas `makeClassy` tends to scale a little better for large projects.
+-- `makeClassy` is less granular, but also requires significantly fewer constraints

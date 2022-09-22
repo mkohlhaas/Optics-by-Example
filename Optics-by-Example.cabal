@@ -2,9 +2,54 @@ cabal-version: 2.4
 name:          Optics-by-Example
 version:       0.1.0.0
 
+library dbclassy
+    exposed-modules:    DBClassy
+    hs-source-dirs:     app
+    default-language:   Haskell2010
+    default-extensions:
+        FlexibleContexts FlexibleInstances FunctionalDependencies
+        TemplateHaskell TypeSynonymInstances UnicodeSyntax
+
+    build-depends:
+        base ^>=4.14.3.0,
+        lens >=5.1.1 && <5.2,
+        mtl >=2.2.2 && <2.3
+
+library init
+    exposed-modules:    Init
+    hs-source-dirs:     app
+    default-language:   Haskell2010
+    default-extensions:
+        FlexibleContexts FlexibleInstances FunctionalDependencies
+        TemplateHaskell TypeSynonymInstances UnicodeSyntax
+
+    build-depends:
+        base ^>=4.14.3.0,
+        lens >=5.1.1 && <5.2,
+        mtl >=2.2.2 && <2.3
+
+library db
+    exposed-modules:    DB
+    hs-source-dirs:     app
+    default-language:   Haskell2010
+    default-extensions:
+        FlexibleContexts FlexibleInstances FunctionalDependencies
+        MultiParamTypeClasses RankNTypes TemplateHaskell
+        TypeSynonymInstances UnicodeSyntax
+
+    build-depends:
+        base ^>=4.14.3.0,
+        lens >=5.1.1 && <5.2,
+        mtl >=2.2.2 && <2.3
+
 executable optics-by-example
     main-is:            Main.hs
     hs-source-dirs:     app
+    other-modules:
+        DB
+        DBClassy
+        Init
+
     default-language:   Haskell2010
     default-extensions:
         DeriveFoldable FlexibleContexts FlexibleInstances
