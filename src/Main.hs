@@ -1,8 +1,8 @@
 module Main where
 
-import Control.Lens (asIndex, at, filtered, filteredBy, foldMapOf, has, ix, makeLensesFor, maximumByOf, only, reindexed, selfIndex, sumOf, view, withIndex, (%~), (&), (*~), (<.), (?~), (^..), (^?), (^@..))
+import Control.Lens (asIndex, at, filtered, filteredBy, foldMapOf, has, ix, lengthOf, makeLensesFor, maximumByOf, only, reindexed, selfIndex, sumOf, toListOf, view, withIndex, (#), (%@~), (%~), (&), (*~), (<.), (?~), (^..), (^?), (^@..), _Nothing)
 import Data.Aeson (FromJSON, ToJSON)
-import Data.Aeson.Lens (key, members, nth, values, _Array, _Double, _Integer, _JSON, _JSON', _Object, _String)
+import Data.Aeson.Lens (key, members, nth, values, _Array, _Double, _Integer, _JSON, _JSON', _Number, _Object, _String)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Ord (comparing)
@@ -406,43 +406,37 @@ pods =
 
 -- |
 -- >>> pods ^? key "apiVersion" . _String
-
 -- Just "v1"
 
 -- 2. Next, count the number of all containers across all pods. You can assume that every element of "items" is a pod.
 
 -- |
 -- >>> lengthOf (key "items" . values . key "spec" . key "containers" . values) pods
-
 -- 2
 
 -- 3. Return the "name" (as Text) of all containers which have the same value for their "image" and "name" fields.
 
 -- |
--- >>> toListOf (key "items" . values . key "spec" . key "containers" . values . filtered (\v -> v ^? key "name" == v ^? key "image") . key "name" . _String) pods
-
--- [ "redis" ]
+-- >>> toListOf (key "items" . values . key "spec" . key "containers" . values . filtered (\v → v ^? key "name" == v ^? key "image") . key "name" . _String) pods
+-- ["redis"]
 
 -- 4. Collect a list of all "containerPort"s alongside their Pod's "metadata > name".
 
 -- |
 -- >>> toListOf ((key "items" . values . reindexed (view (key "metadata" . key "name" . _String)) selfIndex <. (key "spec" . key "containers" . values . key "ports" . values . key "containerPort" . _Integer)) . withIndex) pods
-
--- [ ( "redis-h315w" , 27017) , ( "web-4c5bj" , 3000) ]
+-- [("redis-h315w",27017),("web-4c5bj",3000)]
 
 -- 5. Uppercase the label values inside each pod's metadata.
 
 -- |
 -- >>> pods & key "items" . values . key "metadata" . key "labels" . members . _String %~ toUpper
-
--- <this is way too big to print out>
+-- "{\"apiVersion\":\"v1\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-03-23T19:42:21Z\",\"labels\":{\"name\":\"REDIS\",\"region\":\"USA\"},\"name\":\"redis-h315w\"},\"spec\":{\"containers\":[{\"image\":\"redis\",\"name\":\"redis\",\"ports\":[{\"containerPort\":27017,\"hostPort\":27017,\"name\":\"redis\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}},{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-02-24T20:23:56Z\",\"labels\":{\"name\":\"WEB\",\"region\":\"USA\"},\"name\":\"web-4c5bj\"},\"spec\":{\"containers\":[{\"image\":\"server\",\"name\":\"web\",\"ports\":[{\"containerPort\":3000,\"name\":\"http-server\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}}],\"kind\":\"List\"}"
 
 -- 6. Set a resource request of memory: "256M" for every container.
 
 -- |
 -- >>> pods & key "items" . values . key "spec" . key "containers" . values . key "resources" . key "requests" . _Object . at "memory" ?~ "256M"
-
--- <this is way too big to print out>
+-- "{\"apiVersion\":\"v1\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-03-23T19:42:21Z\",\"labels\":{\"name\":\"redis\",\"region\":\"usa\"},\"name\":\"redis-h315w\"},\"spec\":{\"containers\":[{\"image\":\"redis\",\"name\":\"redis\",\"ports\":[{\"containerPort\":27017,\"hostPort\":27017,\"name\":\"redis\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\",\"memory\":\"256M\"}}}]}},{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-02-24T20:23:56Z\",\"labels\":{\"name\":\"web\",\"region\":\"usa\"},\"name\":\"web-4c5bj\"},\"spec\":{\"containers\":[{\"image\":\"server\",\"name\":\"web\",\"ports\":[{\"containerPort\":3000,\"name\":\"http-server\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\",\"memory\":\"256M\"}}}]}}],\"kind\":\"List\"}"
 
 -- BONUS Questions
 
@@ -459,8 +453,10 @@ pods =
 
 -- |
 -- >>> pods & key "items" . values . key "spec" . key "containers" . values . key "ports" . values . _Object . at "hostPort" . filteredBy _Nothing ?~ _Number # 8080
+-- "{\"apiVersion\":\"v1\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-03-23T19:42:21Z\",\"labels\":{\"name\":\"redis\",\"region\":\"usa\"},\"name\":\"redis-h315w\"},\"spec\":{\"containers\":[{\"image\":\"redis\",\"name\":\"redis\",\"ports\":[{\"containerPort\":27017,\"hostPort\":27017,\"name\":\"redis\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}},{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-02-24T20:23:56Z\",\"labels\":{\"name\":\"web\",\"region\":\"usa\"},\"name\":\"web-4c5bj\"},\"spec\":{\"containers\":[{\"image\":\"server\",\"name\":\"web\",\"ports\":[{\"containerPort\":3000,\"hostPort\":8080,\"name\":\"http-server\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}}],\"kind\":\"List\"}"
 
 -- 9. Prepend the region to the name of each container.
 
 -- |
--- >>> pods & key "items" . values . reindexed (view (key "metadata" . key "labels" . key "region" . _String)) selfIndex <. (key "spec" . key "containers" . values . key "name"
+-- >>> pods & key "items" . values . reindexed (view (key "metadata" . key "labels" . key "region" . _String)) selfIndex <. ( key "spec" . key "containers" . values . key "name" . _String) %@~ (\region name → region <> "-" <> name)
+-- "{\"apiVersion\":\"v1\",\"items\":[{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-03-23T19:42:21Z\",\"labels\":{\"name\":\"redis\",\"region\":\"usa\"},\"name\":\"redis-h315w\"},\"spec\":{\"containers\":[{\"image\":\"redis\",\"name\":\"usa-redis\",\"ports\":[{\"containerPort\":27017,\"hostPort\":27017,\"name\":\"redis\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}},{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"creationTimestamp\":\"2019-02-24T20:23:56Z\",\"labels\":{\"name\":\"web\",\"region\":\"usa\"},\"name\":\"web-4c5bj\"},\"spec\":{\"containers\":[{\"image\":\"server\",\"name\":\"usa-web\",\"ports\":[{\"containerPort\":3000,\"name\":\"http-server\",\"protocol\":\"TCP\"}],\"resources\":{\"requests\":{\"cpu\":\"100m\"}}}]}}],\"kind\":\"List\"}"
