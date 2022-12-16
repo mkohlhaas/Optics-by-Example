@@ -1,3 +1,6 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE StrictData #-}
+
 module Main where
 
 import Control.Applicative (Applicative (liftA2), ZipList (ZipList), (<|>))
@@ -62,6 +65,11 @@ import Text.Printf (printf)
 -- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
 -- >>> over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
 -- ["This one t ...","Nuff!","This is a  ..."]
+stories ∷ [String]
+stories = ["This one time at band camp", "Nuff!", "This is a short story"]
+
+e1 ∷ [String]
+e1 = over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
 
 -- |
 -- Truncate any stories longer than 10 characters, leaving shorter ones alone.
@@ -252,10 +260,8 @@ import Text.Printf (printf)
 -- Building a Lens for a Record Field --
 ----------------------------------------
 
-data Ship = Ship
-  { _shipName ∷ String,
-    _numCrew ∷ Int
-  }
+data Ship where
+  Ship ∷ {_shipName ∷ String, _numCrew ∷ Int} → Ship
   deriving (Show)
 
 purplePearl ∷ Ship
@@ -509,9 +515,9 @@ shipName' = lens getShipName setShipName
 ---------
 -- Err --
 ---------
-data Err
-  = ReallyBadError {_msg ∷ String}
-  | ExitCode {_code ∷ Int}
+data Err where
+  ReallyBadError ∷ {_msg ∷ String} → Err
+  ExitCode ∷ {_code ∷ Int} → Err
   deriving (Eq)
 
 -- makeLenses ''Err
@@ -595,12 +601,14 @@ type UserName = String
 
 type UserId = String
 
-data Session = Session
-  { _userId ∷ UserId,
-    _userName ∷ UserName,
-    _createdTime ∷ String,
-    _expiryTime ∷ String
-  }
+data Session where
+  Session ::
+    { _userId ∷ UserId,
+      _userName ∷ UserName,
+      _createdTime ∷ String,
+      _expiryTime ∷ String
+    } ->
+    Session
   deriving (Show, Eq)
 
 makeLenses ''Session
@@ -692,10 +700,10 @@ recorder = lens getter setter
 -- Writing a Virtual Field --
 -----------------------------
 
-data Temperature = Temperature
-  { _location ∷ String,
-    _celsius ∷ Float
-  }
+data Temperature where
+  Temperature ::
+    {_location ∷ String, _celsius ∷ Float} ->
+    Temperature
   deriving (Show)
 
 makeLenses ''Temperature
@@ -768,11 +776,13 @@ fahrenheit = lens getter setter
 -- Exercises - Virtual Fields --
 --------------------------------
 
-data User = User
-  { _firstName ∷ String,
-    _lastName ∷ String,
-    _userEmail ∷ String
-  }
+data User where
+  User ::
+    { _firstName ∷ String,
+      _lastName ∷ String,
+      _userEmail ∷ String
+    } ->
+    User
   deriving (Show)
 
 makeLenses ''User
@@ -807,10 +817,8 @@ fullName' = lens getter setter
 -- Including Correction Logic in Lenses --
 ------------------------------------------
 
-data Time = Time
-  { _hours ∷ Int,
-    _mins ∷ Int
-  }
+data Time where
+  Time ∷ {_hours ∷ Int, _mins ∷ Int} → Time
   deriving (Show)
 
 clamp ∷ Int → Int → Int → Int
@@ -877,10 +885,10 @@ mins' = lens getter setter
 -- Exercises - Self-Correcting Lenses --
 ----------------------------------------
 
-data ProducePrices = ProducePrices
-  { _limePrice ∷ Float,
-    _lemonPrice ∷ Float
-  }
+data ProducePrices where
+  ProducePrices ::
+    {_limePrice ∷ Float, _lemonPrice ∷ Float} ->
+    ProducePrices
   deriving (Show)
 
 limePrice ∷ Lens' ProducePrices Float
@@ -960,10 +968,10 @@ lemonPrice = lens getter setter
 
 -- We can use polymorphic lenses to change the type of specific slots of a tuple's type,
 -- but this principle generalizes to type variables in other data types as well.
-data Promotion a = Promotion
-  { _item ∷ a,
-    _discountPercentage ∷ Double
-  }
+data Promotion a where
+  Promotion ::
+    {_item ∷ a, _discountPercentage ∷ Double} ->
+    Promotion a
   deriving (Show)
 
 item ∷ Lens (Promotion a) (Promotion b) a b
@@ -1004,10 +1012,8 @@ item = lens getter setter
 -- Can we write polymorphic Lenses for `best` and `worst`?
 -- No. A Lens focuses always on one thing only.
 -- You would need a Traversal.
-data Preferences a = Preferences
-  { _best ∷ a,
-    _worst ∷ a
-  }
+data Preferences a where
+  Preferences ∷ {_best ∷ a, _worst ∷ a} → Preferences a
   deriving (Show)
 
 ------------------------------------
@@ -1030,10 +1036,8 @@ favourites = lens getter setter
     getter pref = (_best pref, _worst pref)
     setter pref (newBest, newWorst) = pref {_best = newBest, _worst = newWorst}
 
-data Preferences' a b = Preferences'
-  { _best' ∷ a,
-    _worst' ∷ b
-  }
+data Preferences' a b where
+  Preferences' ∷ {_best' ∷ a, _worst' ∷ b} → Preferences' a b
   deriving (Show)
 
 best' ∷ Lens (Preferences' a c) (Preferences' b c) a b
@@ -1049,7 +1053,10 @@ worst' = lens getter setter
     setter pref newVal = pref {_worst' = newVal}
 
 -- 3. We can change type of more complex types too. What is the type of a lens which could change the type variable here?
-data Result e = Result {_lineNumber ∷ Int, _result ∷ Either e String}
+data Result e where
+  Result ::
+    {_lineNumber ∷ Int, _result ∷ Either e String} ->
+    Result e
 
 -- Because the `e` is inside an Either type we can't focus it with a lens directly, we're not always
 -- guaranteed to have an e available. We'll have to focus the entire Either and let the user decide
@@ -1063,9 +1070,9 @@ result = lens getter setter
 -- 4. It's thinking time! Is it possible to change more than one type variable at a time using a polymorphic lens?
 -- Yes!
 
-data ParseResult e a
-  = Error e
-  | ParseResult a
+data ParseResult e a where
+  Error ∷ e → ParseResult e a
+  ParseResult ∷ a → ParseResult e a
   deriving (Show)
 
 --                   input getter
@@ -1103,23 +1110,23 @@ pred = lens getter setter
 ------------------------------------------------------
 
 -- Deeply Nested Types
-data Person = Person
-  { _fullName ∷ String,
-    _address ∷ Address
-  }
+data Person where
+  Person ∷ {_fullName ∷ String, _address ∷ Address} → Person
   deriving (Show)
 
-data Address = Address
-  { _streetAddress ∷ StreetAddress,
-    _city ∷ String,
-    _country ∷ String
-  }
+data Address where
+  Address ::
+    { _streetAddress ∷ StreetAddress,
+      _city ∷ String,
+      _country ∷ String
+    } ->
+    Address
   deriving (Show)
 
-data StreetAddress = StreetAddress
-  { _streetNumber ∷ String,
-    _streetName ∷ String
-  }
+data StreetAddress where
+  StreetAddress ::
+    {_streetNumber ∷ String, _streetName ∷ String} ->
+    StreetAddress
   deriving (Show)
 
 makeLenses ''Person
@@ -1253,10 +1260,8 @@ data Wool = Wool deriving (Show)
 
 data Sweater = Sweater deriving (Show)
 
-data Item a = Item
-  { _material ∷ a,
-    _amount ∷ Int
-  }
+data Item a where
+  Item ∷ {_material ∷ a, _amount ∷ Int} → Item a
   deriving (Show)
 
 makeLenses ''Item
@@ -1351,7 +1356,9 @@ gameState = (Player, Item Wool 5)
 -- view a.k.a. ^. --
 --------------------
 
-data Payload = Payload {_weightKilos ∷ Int, _cargo ∷ String} deriving (Show)
+data Payload where
+  Payload ∷ {_weightKilos ∷ Int, _cargo ∷ String} → Payload
+  deriving (Show)
 
 newtype Boat = Boat {_payload ∷ Payload} deriving (Show)
 
@@ -1549,23 +1556,18 @@ makeLenses ''Thermometer
 
 -- 1. Consider the following list of types:
 
-data Gate = Gate
-  { _open ∷ Bool,
-    _oilTemp ∷ Float
-  }
+data Gate where
+  Gate ∷ {_open ∷ Bool, _oilTemp ∷ Float} → Gate
   deriving (Show)
 
-data Army = Army
-  { _archers ∷ Int,
-    _knights ∷ Int
-  }
+data Army where
+  Army ∷ {_archers ∷ Int, _knights ∷ Int} → Army
   deriving (Show)
 
-data Kingdom = Kingdom
-  { _kname ∷ String,
-    _army ∷ Army,
-    _gate ∷ Gate
-  }
+data Kingdom where
+  Kingdom ::
+    {_kname ∷ String, _army ∷ Army, _gate ∷ Gate} ->
+    Kingdom
   deriving (Show)
 
 makeLenses ''Gate
@@ -1656,11 +1658,13 @@ data Role
   | FirstMate
   deriving (Show, Eq, Ord)
 
-data CrewMember = CrewMember
-  { _crewMemberName ∷ String,
-    _role ∷ Role,
-    _talents ∷ [String]
-  }
+data CrewMember where
+  CrewMember ::
+    { _crewMemberName ∷ String,
+      _role ∷ Role,
+      _talents ∷ [String]
+    } ->
+    CrewMember
   deriving (Show, Eq, Ord)
 
 makeLenses ''CrewMember
@@ -1952,12 +1956,14 @@ newtype Name = Name {getName ∷ String}
   deriving (Show)
 
 -- Not foldable, not even having a type parameter!
-data ShipCrew = ShipCrew
-  { _ship ∷ Name,
-    _captain ∷ Name,
-    _firstMate ∷ Name,
-    _conscripts ∷ [Name]
-  }
+data ShipCrew where
+  ShipCrew ::
+    { _ship ∷ Name,
+      _captain ∷ Name,
+      _firstMate ∷ Name,
+      _conscripts ∷ [Name]
+    } ->
+    ShipCrew
   deriving (Show)
 
 makeLenses ''ShipCrew
@@ -2037,7 +2043,7 @@ myCrew =
 crewNames ∷ Fold ShipCrew Name
 crewNames =
   folding
-    ( \s →
+    ( \s ->
         s ^.. captain
           <> s ^.. firstMate
           <> s ^.. conscripts . folded
@@ -2291,21 +2297,21 @@ crewNames =
 -- Queries Case Study --
 ------------------------
 
-data Actor = Actor
-  { _actorName ∷ String,
-    _birthYear ∷ Int
-  }
+data Actor where
+  Actor ∷ {_actorName ∷ String, _birthYear ∷ Int} → Actor
   deriving (Show, Eq)
 
 makeLenses ''Actor
 
-data TVShow = TVShow
-  { _title ∷ String,
-    _numEpisodes ∷ Int,
-    _numSeasons ∷ Int,
-    _criticScore ∷ Double,
-    _actors ∷ [Actor]
-  }
+data TVShow where
+  TVShow ::
+    { _title ∷ String,
+      _numEpisodes ∷ Int,
+      _numSeasons ∷ Int,
+      _criticScore ∷ Double,
+      _actors ∷ [Actor]
+    } ->
+    TVShow
   deriving (Show, Eq)
 
 makeLenses ''TVShow
@@ -2988,12 +2994,14 @@ trimmingWhile predicate = backwards . droppingWhile predicate . backwards . drop
 
 -- The power comes from using `filtered` in the midst of other folds!!!
 
-data Card = Card
-  { _cardName ∷ String,
-    _aura ∷ Aura,
-    _holo ∷ Bool,
-    _moves ∷ [Move]
-  }
+data Card where
+  Card ::
+    { _cardName ∷ String,
+      _aura ∷ Aura,
+      _holo ∷ Bool,
+      _moves ∷ [Move]
+    } ->
+    Card
   deriving (Show, Eq)
 
 -- Each card has an aura-type
@@ -3005,10 +3013,8 @@ data Aura
   deriving (Show, Eq)
 
 -- Cards have attack moves
-data Move = Move
-  { _moveName ∷ String,
-    _movePower ∷ Int
-  }
+data Move where
+  Move ∷ {_moveName ∷ String, _movePower ∷ Int} → Move
   deriving (Show, Eq)
 
 makeLenses ''Card
@@ -3738,18 +3744,14 @@ validateEmail' email
 --    to validate that the given user has an age value above zero and below 150. Return an appropriate
 --    error message if it fails validation.
 
-data AUser = AUser
-  { _aname ∷ String,
-    _age ∷ Int
-  }
+data AUser where
+  AUser ∷ {_aname ∷ String, _age ∷ Int} → AUser
   deriving (Show)
 
 makeLenses ''AUser
 
-data Account = Account
-  { _accId ∷ String,
-    _user ∷ AUser
-  }
+data Account where
+  Account ∷ {_accId ∷ String, _user ∷ AUser} → Account
   deriving (Show)
 
 makeLenses ''Account
@@ -3818,9 +3820,9 @@ values handler (a : as) = (:) <$> handler a <*> values handler as
 -- Traversals with Custom Logic --
 ----------------------------------
 
-data Transaction
-  = Withdrawal {_moneyAmount ∷ Int}
-  | Deposit {_moneyAmount ∷ Int}
+data Transaction where
+  Withdrawal ∷ {_moneyAmount ∷ Int} → Transaction
+  Deposit ∷ {_moneyAmount ∷ Int} → Transaction
   deriving (Show)
 
 -- Note that it's normally bad-style to have field names on types with multiple constructors.
@@ -4675,12 +4677,14 @@ instance Ixed (Cycled a) where
 -- Custom At: Address Indexing --
 ---------------------------------
 
-data PostalAddress = PostalAddress
-  { _buildingNumber ∷ Maybe String,
-    _streetsName ∷ Maybe String,
-    _apartmentNumber ∷ Maybe String,
-    _postalCode ∷ Maybe String
-  }
+data PostalAddress where
+  PostalAddress ::
+    { _buildingNumber ∷ Maybe String,
+      _streetsName ∷ Maybe String,
+      _apartmentNumber ∷ Maybe String,
+      _postalCode ∷ Maybe String
+    } ->
+    PostalAddress
   deriving (Show)
 
 makeLenses ''PostalAddress
@@ -5135,10 +5139,10 @@ type Path = [String]
 
 type Body = String
 
-data Request
-  = Post Path Body
-  | Get Path
-  | Delete Path
+data Request where
+  Post ∷ Path → Body → Request
+  Get ∷ Path → Request
+  Delete ∷ Path → Request
   deriving (Show)
 
 -- Creates `_Post` `_Get` and `_Delete` prisms.
@@ -5357,10 +5361,10 @@ makePrisms ''Request
 
 -- 1. Which prisms will be generated from the following data declaration? Give their names and types!
 
-data ContactInfo
-  = CiEmail String
-  | CiTelephone Int
-  | CiAddress String String String
+data ContactInfo where
+  CiEmail ∷ String → ContactInfo
+  CiTelephone ∷ Int → ContactInfo
+  CiAddress ∷ String → String → String → ContactInfo
 
 makePrisms ''ContactInfo
 
@@ -6926,6 +6930,8 @@ showDayAndNumber a b = a <> ": " <> show b
 (.++) ∷ (Indexed String s t → r) → (Indexed String a b → s → t) → Indexed String a b → r
 (.++) = icompose (\a b → a ++ ", " ++ b)
 
+infixl 9 .++
+
 -- The hardest part about writing these custom operators is figuring out their type!
 -- You can leave the type signature off and simply use the operator in an expression, then ask GHCi or the language server for the type!
 
@@ -7088,11 +7094,8 @@ board =
 
 {- ORMOLU_DISABLE -}
 
-data Board a
-  = Board
-      a a a
-      a a a
-      a a a
+data Board a where
+  Board ∷ a → a → a → a → a → a → a → a → a → Board a
   deriving (Show, Foldable)
 
 -- Individual squares in our grid be represented as X-Y coordinates of Positions.
@@ -7496,10 +7499,12 @@ type BenutzerName = String
 
 type Password = String
 
-data Env = Env
-  { _currentUser ∷ BenutzerName,
-    _users ∷ Map BenutzerName Password
-  }
+data Env where
+  Env ::
+    { _currentUser ∷ BenutzerName,
+      _users ∷ Map BenutzerName Password
+    } ->
+    Env
   deriving (Show)
 
 makeLenses ''Env
@@ -7532,11 +7537,10 @@ getUserPassword = do
 -- State Monad Combinators --
 -----------------------------
 
-data Till = Till
-  { _total ∷ Double,
-    _sales ∷ [Double],
-    _taxRate ∷ Double
-  }
+data Till where
+  Till ::
+    {_total ∷ Double, _sales ∷ [Double], _taxRate ∷ Double} ->
+    Till
   deriving (Show)
 
 makeLenses ''Till
@@ -7565,10 +7569,8 @@ saleCalculation = do
 -- Magnify & Zoom --
 --------------------
 
-data Weather = Weather
-  { _temp ∷ Float,
-    _pressure ∷ Float
-  }
+data Weather where
+  Weather ∷ {_temp ∷ Float, _pressure ∷ Float} → Weather
   deriving (Show)
 
 makeLenses ''Weather
@@ -7687,11 +7689,13 @@ greetByName r = "Hello " <> r ^. name <> "!"
 -- Separating Logic and Minimizing Global Knowledge --
 ------------------------------------------------------
 
-data DataDBEnv = DataDBEnv
-  { _portNumber ∷ Int,
-    _hostName ∷ String,
-    _databaseUrl ∷ String
-  }
+data DataDBEnv where
+  DataDBEnv ::
+    { _portNumber ∷ Int,
+      _hostName ∷ String,
+      _databaseUrl ∷ String
+    } ->
+    DataDBEnv
   deriving (Show)
 
 makeLenses ''DataDBEnv
@@ -7747,11 +7751,13 @@ main = do
 -- Granular Dependencies with `makeFields` --
 ---------------------------------------------
 
-data EnvDb = EnvDb
-  { _envDbPNumber ∷ Int,
-    _envDbHName ∷ String,
-    _envDbDatenbankUrl ∷ DatabaseUrl
-  }
+data EnvDb where
+  EnvDb ::
+    { _envDbPNumber ∷ Int,
+      _envDbHName ∷ String,
+      _envDbDatenbankUrl ∷ DatabaseUrl
+    } ->
+    EnvDb
   deriving (Show)
 
 -- Because we imported the DB module, `makeFields` won't define a new HasDatenbankUrl class from the `_envDbDatenbankUrl` field.
@@ -7767,10 +7773,10 @@ makeFields ''EnvDb
 -- `makeFields` vs `makeClassy` --
 ----------------------------------
 
-data People = People
-  { _personName ∷ String,
-    _favouriteFood ∷ String
-  }
+data People where
+  People ::
+    {_personName ∷ String, _favouriteFood ∷ String} ->
+    People
   deriving (Show)
 
 -- makeFieldsNoPrefix ''People
