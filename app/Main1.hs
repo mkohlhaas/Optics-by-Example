@@ -36,14 +36,8 @@ import Numeric.Lens (adding, dividing, multiplying, negated)
 import Text.Printf (printf)
 
 --------------------------------------------------------------------------------------------
---                                         Optics                                         --
+--                                      2. Optics                                         --
 --------------------------------------------------------------------------------------------
-
--- Nearly every data-related programming problem I’ve been faced with in the last year has had an elegant optics-based solution which typically takes less than a single line of code! (1)
--- `optics` are a family of inter-composable combinators for building bidirectional data transformations. (6)
--- They [optics] allow us to cleanly separate concerns in stronger ways than either of Object-Oriented or Functional-Programming styles allow on their own. (6)
--- Optics allow us to specify which portions of data we wish to work with SEPARATELY from the operations we wish to perform on them. (6)
--- Most tasks can be expressed in a single line of code, and in many cases the resulting code even reads like a simple sentence. (7)
 
 ----------------------------------
 -- Practical Optics at a Glance --
@@ -64,17 +58,6 @@ import Text.Printf (printf)
 -- Truncate any stories longer than 10 characters, leaving shorter ones alone.
 -- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
 -- >>> over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
--- ["This one t ...","Nuff!","This is a  ..."]
-stories ∷ [String]
-stories = ["This one time at band camp", "Nuff!", "This is a short story"]
-
-e1 ∷ [String]
-e1 = over (traversed . filtered ((> 10) . length)) (\story → take 10 story ++ " ...") stories
-
--- |
--- Truncate any stories longer than 10 characters, leaving shorter ones alone.
--- >>> stories = ["This one time at band camp", "Nuff!", "This is a short story"]
--- >>> over (traversed . filtered (length >>> (> 10))) (\story → take 10 story ++ " ...") stories
 -- ["This one t ...","Nuff!","This is a  ..."]
 
 ------------------------------------
