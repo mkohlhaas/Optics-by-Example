@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StrictData #-}
+
 -- {-# OPTIONS_GHC -ddump-splices #-}
 
 module Main where
@@ -498,10 +499,10 @@ e029 = set numCrew (view numCrew purplePearl + 3) purplePearl
 
 -- 3. The following code won’t compile! Can you see what’s wrong and fix the problem?
 -- data Pet where
---   Pet ::
+--   Pet ∷
 --     { _petName ∷ String,
 --       _petType ∷ String
---     } ->
+--     } →
 --     Pet
 
 -- getPetName ∷ Pet → String
@@ -701,7 +702,7 @@ e037 =
 -- Case Study: lensProduct --
 -----------------------------
 
--- A very useful law-breaking lens: lensProduct.
+-- A very useful unlawful lens: lensProduct.
 -- lensProduct ∷ Lens' s a → Lens' s b → Lens' s (a, b)
 
 -- It allows you to take two lenses which accept the same structure to simultaneously focus two distinct
@@ -714,9 +715,7 @@ type UserId = String
 data Session where
   Session ::
     { _userId ∷ UserId,
-      _userName ∷ UserName,
-      _createdTime ∷ String,
-      _expiryTime ∷ String
+      _userName ∷ UserName
     } ->
     Session
   deriving (Show, Eq)
@@ -726,44 +725,67 @@ makeLenses ''Session
 userInfo ∷ Lens' Session (UserId, UserName)
 userInfo = lensProduct userId userName
 
+-- e038
+e038 ∷ (UserId, UserName)
+e038 =
+  let session = Session "USER-1234" "Joey Tribbiani"
+   in view userInfo session
+
 -- |
--- `userId` and `userName` are disjoint:
--- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
--- >>> view userInfo session
+-- >>> e038
 -- ("USER-1234","Joey Tribbiani")
 
 -- Session and `userId` are not disjoint - they overlap!
 alongsideUserId ∷ Lens' Session (Session, UserId)
 alongsideUserId = lensProduct id userId
 
+-- changing the user in the new session
+e039 ∷ (Session, UserId)
+e039 =
+  let session = Session "USER-1234" "Joey Tribbiani"
+      newSession = session {_userId = "USER-5678"}
+   in view alongsideUserId (set alongsideUserId (newSession, "USER-9999") session)
+
 -- |
--- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
--- >>> let newSession = session {_userId = "USER-5678"}
--- >>> view alongsideUserId (set alongsideUserId (newSession, "USER-9999") session)
--- (Session {_userId = "USER-9999", _userName = "Joey Tribbiani", _createdTime = "2019-07-25", _expiryTime = "2019-08-25"},"USER-9999")
+-- >>> e039
+-- (Session {_userId = "USER-9999", _userName = "Joey Tribbiani"},"USER-9999")
 
 -- |
 -- 1st lens law
--- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
--- >>> let newSession = session {_userId = "USER-5678"}
--- >>> view alongsideUserId (set alongsideUserId (newSession, "USER-9999") session) == (newSession, "USER-9999")
+e040 ∷ Bool
+e040 =
+  let session = Session "USER-1234" "Joey Tribbiani"
+      newSession = session {_userId = "USER-5678"}
+   in view alongsideUserId (set alongsideUserId (newSession, "USER-9999") session) == (newSession, "USER-9999")
+
+-- |
+-- >>> e040
 -- False
 
 -- This time order has changed.
 alongsideSession ∷ Lens' Session (UserId, Session)
 alongsideSession = lensProduct userId id
 
--- |
 -- value in the session overwrites the other
--- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
--- >>> let newSession = session {_userId = "USER-5678"}
--- >>> view alongsideSession (set alongsideSession ("USER-9999", newSession) session)
--- ("USER-5678",Session {_userId = "USER-5678", _userName = "Joey Tribbiani", _createdTime = "2019-07-25", _expiryTime = "2019-08-25"})
+e041 ∷ (UserId, Session)
+e041 =
+  let session = Session "USER-1234" "Joey Tribbiani"
+      newSession = session {_userId = "USER-5678"}
+   in view alongsideSession (set alongsideSession ("USER-9999", newSession) session)
 
 -- |
--- >>> let session = Session "USER-1234" "Joey Tribbiani" "2019-07-25" "2019-08-25"
--- >>> let newSession = session {_userId = "USER-5678"}
--- >>> view alongsideSession (set alongsideSession ("USER-9999", newSession) session) == ("USER-9999", newSession)
+-- >>> e041
+-- ("USER-5678",Session {_userId = "USER-5678", _userName = "Joey Tribbiani"})
+
+-- e042
+e042 ∷ Bool
+e042 =
+  let session = Session "USER-1234" "Joey Tribbiani"
+      newSession = session {_userId = "USER-5678"}
+   in view alongsideSession (set alongsideSession ("USER-9999", newSession) session) == ("USER-9999", newSession)
+
+-- |
+-- >>> e042
 -- False
 
 ----------------------
@@ -778,26 +800,38 @@ recorder = lens getter setter
     getter (_, a) = a
     setter (history, a) newVal = (a : history, newVal)
 
--- |
 -- 1st law (set-get).
--- >>> let tstData = ([5, 4, 3, 2, 1], 5)
--- >>> let newValue = 6
--- >>> view recorder (set recorder newValue tstData) == newValue
+e043 ∷ Bool
+e043 =
+  let tstData = ([5, 4, 3, 2, 1], 5)
+      newValue = 6
+   in view recorder (set recorder newValue tstData) == newValue
+
+-- |
+-- >>> e043
 -- True
 
--- |
 -- 2nd law (get-set).
--- >>> let tstData = ([5, 4, 3, 2, 1], 5)
--- >>> let newValue = 6
--- >>> set recorder (view recorder tstData) tstData == tstData
--- False
+e044 ∷ Bool
+e044 =
+  let tstData = ([5, 4, 3, 2, 1], 5)
+      newValue = 6
+   in set recorder (view recorder tstData) tstData == tstData
 
 -- |
+-- >>> e044
+-- False
+
 -- 3rd law (set-set).
--- >>> let tstData = ([5, 4, 3, 2, 1], 5)
--- >>> let newValue = 6
--- >>> let anotherValue = 7
--- >>> set recorder newValue (set recorder anotherValue tstData) == set recorder newValue tstData
+e045 ∷ Bool
+e045 =
+  let tstData = ([5, 4, 3, 2, 1], 5)
+      newValue = 6
+      anotherValue = 7
+   in set recorder newValue (set recorder anotherValue tstData) == set recorder newValue tstData
+
+-- |
+-- >>> e045
 -- False
 
 -- 2. Test the get-set and set-set laws for the `msg` lens we wrote this chapter. Does it pass these laws? See above - they pass.
@@ -812,7 +846,9 @@ recorder = lens getter setter
 
 data Temperature where
   Temperature ::
-    {_location ∷ String, _celsius ∷ Float} ->
+    { _location ∷ String,
+      _celsius ∷ Float
+    } ->
     Temperature
   deriving (Show)
 
@@ -820,20 +856,34 @@ makeLenses ''Temperature
 
 -- celsius ∷ Lens' Temperature Float
 
+-- e046
+e046 ∷ Float
+e046 =
+  let temp = Temperature "Berlin" 7.0
+   in view celsius temp
+
 -- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> view celsius temp
+-- >>> e046
 -- 7.0
 
--- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> set celsius 13.5 temp
--- Temperature {_location = "Berlin", _celsius = 13.5}
+-- e047
+e047 ∷ Temperature
+e047 =
+  let temp = Temperature "Berlin" 7.0
+   in set celsius 13.5 temp
 
 -- |
+-- >>> e047
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
 -- Bump the temperature up by 10 degrees Celsius
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> over celsius (+10) temp
+e048 ∷ Temperature
+e048 =
+  let temp = Temperature "Berlin" 7.0
+   in over celsius (+ 10) temp
+
+-- |
+-- >>> e048
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
 -- Conversion Functions
@@ -843,20 +893,34 @@ celsiusToFahrenheit c = (c * (9 / 5)) + 32
 fahrenheitToCelsius ∷ Float → Float
 fahrenheitToCelsius f = (f - 32) * (5 / 9)
 
+-- e049
+e049 ∷ Float
+e049 =
+  let temp = Temperature "Berlin" 7.0
+   in view celsius temp & celsiusToFahrenheit
+
 -- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> view celsius temp & celsiusToFahrenheit
+-- >>> e049
 -- 44.6
 
--- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> set celsius (fahrenheitToCelsius 56.3) temp
--- Temperature {_location = "Berlin", _celsius = 13.5}
+-- e050
+e050 ∷ Temperature
+e050 =
+  let temp = Temperature "Berlin" 7.0
+   in set celsius (fahrenheitToCelsius 56.3) temp
 
 -- |
+-- >>> e050
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
 -- Bump the temp by 18 degrees Fahrenheit
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> over celsius (fahrenheitToCelsius . (+18) . celsiusToFahrenheit) temp
+e051 ∷ Temperature
+e051 =
+  let temp = Temperature "Berlin" 7.0
+   in over celsius (fahrenheitToCelsius . (+ 18) . celsiusToFahrenheit) temp
+
+-- |
+-- >>> e051
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
 -- virtual field (using existing lens)
@@ -867,19 +931,34 @@ fahrenheit = lens getter setter
     getter = celsiusToFahrenheit . view celsius
     setter temp f = set celsius (fahrenheitToCelsius f) temp
 
+-- e052
+e052 ∷ Float
+e052 =
+  let temp = Temperature "Berlin" 7.0
+   in view fahrenheit temp
+
 -- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> view fahrenheit temp
+-- >>> e052
 -- 44.6
 
--- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> set fahrenheit 56.3 temp
--- Temperature {_location = "Berlin", _celsius = 13.5}
+-- e053
+e053 ∷ Temperature
+e053 =
+  let temp = Temperature "Berlin" 7.0
+   in set fahrenheit 56.3 temp
 
 -- |
--- >>> let temp = Temperature "Berlin" 7.0
--- >>> over fahrenheit (+ 18) temp
+-- >>> e053
+-- Temperature {_location = "Berlin", _celsius = 13.5}
+
+-- e054
+e054 ∷ Temperature
+e054 =
+  let temp = Temperature "Berlin" 7.0
+   in over fahrenheit (+ 18) temp
+
+-- |
+-- >>> e054
 -- Temperature {_location = "Berlin", _celsius = 17.0}
 
 --------------------------------
@@ -909,26 +988,40 @@ fullName' = lens getter setter
         fstname = head . words
         lstname = unwords . tail . words
 
+-- e055
+e055 ∷ String
+e055 =
+  let user = User "John" "Cena" "invisible@example.com"
+   in view fullName' user
+
 -- |
--- >>> let user = User "John" "Cena" "invisible@example.com"
--- >>> view fullName' user
+-- >>> e055
 -- "John Cena"
 
+-- e056
+e056 ∷ User
+e056 =
+  let user = User "John" "Cena" "invisible@example.com"
+   in set fullName' "Doctor of Thuganomics" user
+
 -- |
--- >>> let user = User "John" "Cena" "invisible@example.com"
--- >>> set fullName' "Doctor of Thuganomics" user
+-- >>> e056
 -- User {_firstName = "Doctor", _lastName = "of Thuganomics", _userEmail = "invisible@example.com"}
 
-------------------------------------------------
--- Data Correction and Maintaining Invariants --
-------------------------------------------------
+----------------------------------------------------
+-- 3.7 Data Correction and Maintaining Invariants --
+----------------------------------------------------
 
 ------------------------------------------
 -- Including Correction Logic in Lenses --
 ------------------------------------------
 
 data Time where
-  Time ∷ {_hours ∷ Int, _mins ∷ Int} → Time
+  Time ::
+    { _hours ∷ Int,
+      _mins ∷ Int
+    } ->
+    Time
   deriving (Show)
 
 clamp ∷ Int → Int → Int → Int
@@ -946,18 +1039,24 @@ mins = lens getter setter
     getter (Time _ m) = m
     setter (Time h _) newMinutes = Time h (clamp 0 59 newMinutes)
 
--- |
--- >>> Time 3 10
--- Time {_hours = 3, _mins = 10}
+-- e057
+e057 ∷ Time
+e057 =
+  let time = Time 3 10
+   in set hours 40 time
 
 -- |
--- >>> let time = Time 3 10
--- >>> set hours 40 time
+-- >>> e057
 -- Time {_hours = 23, _mins = 10}
 
+-- e058
+e058 ∷ Time
+e058 =
+  let time = Time 3 10
+   in set mins (-10) time
+
 -- |
--- >>> let time = Time 3 10
--- >>> set mins (-10) time
+-- >>> e058
 -- Time {_hours = 3, _mins = 0}
 
 -- alternative implementations - unlawful lenses but helpful!
@@ -973,22 +1072,32 @@ mins' = lens getter setter
     getter (Time _ m) = m
     setter (Time h _) newMinutes = Time ((h + (newMinutes `div` 60)) `mod` 24) (newMinutes `mod` 60)
 
--- |
--- >>> Time 3 10
--- Time {_hours = 3, _mins = 10}
+-- e059
+e059 ∷ Time
+e059 =
+  let time = Time 3 10
+   in over mins' (+ 55) time
 
 -- |
--- >>> let time = Time 3 10
--- >>> over mins' (+ 55) time
+-- >>> e059
 -- Time {_hours = 4, _mins = 5}
 
--- |
--- >>> let time = Time 3 10
--- >>> over mins' (subtract 20) time
--- Time {_hours = 2, _mins = 50}
+-- e060
+e060 ∷ Time
+e060 =
+  let time = Time 3 10
+   in over mins' (subtract 20) time
 
 -- |
--- >>> over mins' (+1) (Time 23 59)
+-- >>> e060
+-- Time {_hours = 2, _mins = 50}
+
+-- e061
+e061 ∷ Time
+e061 = over mins' (+ 1) (Time 23 59)
+
+-- |
+-- >>> e061
 -- Time {_hours = 0, _mins = 0}
 
 ----------------------------------------
@@ -997,7 +1106,9 @@ mins' = lens getter setter
 
 data ProducePrices where
   ProducePrices ::
-    {_limePrice ∷ Float, _lemonPrice ∷ Float} ->
+    { _limePrice ∷ Float,
+      _lemonPrice ∷ Float
+    } ->
     ProducePrices
   deriving (Show)
 
@@ -1023,33 +1134,52 @@ lemonPrice = lens getter setter
     setter pp newPrice | _limePrice pp - newPrice > 0.5 = pp {_lemonPrice = newPrice, _limePrice = newPrice + 0.5}
     setter pp newPrice = pp {_lemonPrice = newPrice}
 
+-- e062
+e062 ∷ ProducePrices
+e062 =
+  let prices = ProducePrices 1.50 1.48
+   in set limePrice 2 prices
+
 -- |
--- >>> let prices = ProducePrices 1.50 1.48
--- >>> set limePrice 2 prices
+-- >>> e062
 -- ProducePrices {_limePrice = 2.0, _lemonPrice = 1.5}
 
+-- e063
+e063 ∷ ProducePrices
+e063 =
+  let prices = ProducePrices 1.50 1.48
+   in set limePrice 1.8 prices
+
 -- |
--- >>> let prices = ProducePrices 1.50 1.48
--- >>> set limePrice 1.8 prices
+-- >>> e063
 -- ProducePrices {_limePrice = 1.8, _lemonPrice = 1.48}
 
--- |
--- >>> let prices = ProducePrices 1.50 1.48
--- >>> set limePrice 1.63 prices
--- ProducePrices {_limePrice = 1.63, _lemonPrice = 1.48}
+-- e064
+e064 =
+  let prices = ProducePrices 1.50 1.48
+   in set limePrice 1.63 prices
 
 -- |
--- >>> let prices = ProducePrices 1.50 1.48
--- >>> set limePrice (-1.00) prices
+-- >>> e064
+-- ProducePrices {_limePrice = 1.63, _lemonPrice = 1.48}
+
+-- e065
+e065 ∷ ProducePrices
+e065 =
+  let prices = ProducePrices 1.50 1.48
+   in set limePrice (-1.00) prices
+
+-- |
+-- >>> e065
 -- ProducePrices {_limePrice = 0.0, _lemonPrice = 0.5}
 
 --------------------------------------------------------------------------------------------
---                                 Polymorphic Optics                                     --
+--                              4. Polymorphic Optics                                     --
 --------------------------------------------------------------------------------------------
 
-----------------------------------------
--- Introduction to Polymorphic Optics --
-----------------------------------------
+--------------------------------------------
+-- 4.1 Introduction to Polymorphic Optics --
+--------------------------------------------
 
 ----------------------------------
 -- Simple vs Polymorphic Optics --
@@ -1058,15 +1188,14 @@ lemonPrice = lens getter setter
 -- polymorphic lens
 -- Lens s t a b
 
--- When we run an action (like over) on our lens we dive deep into the structure <s> to find the focus
--- <a>, then pass that to the action. The action has the option of modifying the focus to return a <b>,
--- then the lens glues everything back together and construct a <t>.
+-- s: structure before action
+-- t: structure after action
+-- a: focus before action
+-- b: focus after action
 
--- We need polymorphic lenses whenever an action might want to change the type of the focus!
-
------------------------------------------
--- When do We Need Polymorphic Lenses? --
------------------------------------------
+---------------------------------------------
+-- 4.2 When do We Need Polymorphic Lenses? --
+---------------------------------------------
 
 ---------------------------
 -- Type-Changing Focuses --
@@ -1080,7 +1209,9 @@ lemonPrice = lens getter setter
 -- but this principle generalizes to type variables in other data types as well.
 data Promotion a where
   Promotion ::
-    {_item ∷ a, _discountPercentage ∷ Double} ->
+    { _item ∷ a,
+      _discountPercentage ∷ Double
+    } ->
     Promotion a
   deriving (Show)
 
@@ -1092,38 +1223,26 @@ item = lens getter setter
     setter ∷ Promotion a → b → Promotion b
     setter promo newItem = promo {_item = newItem}
 
--- |
--- >>> Promotion "A really delicious Peach" 25.0
--- Promotion {_item = "A really delicious Peach", _discountPercentage = 25.0}
+-- e066
+e066 ∷ Promotion [String]
+e066 =
+  let peachPromo = Promotion "A really delicious Peach" 25.0
+      buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
+   in set item buffyFigurines peachPromo
 
 -- |
--- let peachPromo = Promotion "A really delicious Peach" 25.0
--- :t peachPromo
--- peachPromo ∷ Promotion String
-
--- |
--- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
--- :t buffyFigurines
--- buffyFigurines ∷ [String]
-
--- |
--- >>> let peachPromo = Promotion "A really delicious Peach" 25.0
--- >>> let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
--- >>> set item buffyFigurines peachPromo
+-- >>> e066
 -- Promotion {_item = ["Buffy","Angel","Willow","Giles"], _discountPercentage = 25.0}
-
--- |
--- let peachPromo = Promotion "A really delicious Peach" 25.0
--- let buffyFigurines = ["Buffy", "Angel", "Willow", "Giles"]
--- let buffyPromo = set item buffyFigurines peachPromo
--- :t buffyPromo
--- buffyPromo ∷ Promotion [String]
 
 -- Can we write polymorphic Lenses for `best` and `worst`?
 -- No. A Lens focuses always on one thing only.
 -- You would need a Traversal.
 data Preferences a where
-  Preferences ∷ {_best ∷ a, _worst ∷ a} → Preferences a
+  Preferences ::
+    { _best ∷ a,
+      _worst ∷ a
+    } ->
+    Preferences a
   deriving (Show)
 
 ------------------------------------
@@ -1147,7 +1266,11 @@ favourites = lens getter setter
     setter pref (newBest, newWorst) = pref {_best = newBest, _worst = newWorst}
 
 data Preferences' a b where
-  Preferences' ∷ {_best' ∷ a, _worst' ∷ b} → Preferences' a b
+  Preferences' ::
+    { _best' ∷ a,
+      _worst' ∷ b
+    } ->
+    Preferences' a b
   deriving (Show)
 
 best' ∷ Lens (Preferences' a c) (Preferences' b c) a b
@@ -1165,7 +1288,9 @@ worst' = lens getter setter
 -- 3. We can change type of more complex types too. What is the type of a lens which could change the type variable here?
 data Result e where
   Result ::
-    {_lineNumber ∷ Int, _result ∷ Either e String} ->
+    { _lineNumber ∷ Int,
+      _result ∷ Either e String
+    } ->
     Result e
 
 -- Because the `e` is inside an Either type we can't focus it with a lens directly, we're not always
@@ -1185,16 +1310,13 @@ data ParseResult e a where
   ParseResult ∷ a → ParseResult e a
   deriving (Show)
 
---                   input getter
---                        |            output setter
---                        |                 |         output getter
---                        |                 |              |        input setter
---                        |                 |              |            |
 parseResult ∷ Lens (ParseResult e a) (ParseResult f b) (Either e a) (Either f b)
 parseResult = lens getter setter
   where
+    getter ∷ ParseResult a b → Either a b
     getter (Error e) = Left e
     getter (ParseResult a) = Right a
+    setter ∷ p → Either e a → ParseResult e a
     setter _ (Left e) = Error e
     setter _ (Right a) = ParseResult a
 
@@ -1211,9 +1333,9 @@ pred = lens getter setter
     getter (Predicate f) = f
     setter _ newFn = Predicate newFn
 
-----------------------
--- Composing Lenses --
-----------------------
+--------------------------
+-- 4.3 Composing Lenses --
+--------------------------
 
 ------------------------------------------------------
 -- How do I Update Fields in Deeply Nested Records? --
@@ -1221,7 +1343,11 @@ pred = lens getter setter
 
 -- Deeply Nested Types
 data Person where
-  Person ∷ {_fullName ∷ String, _address ∷ Address} → Person
+  Person ::
+    { _fullName ∷ String,
+      _address ∷ Address
+    } ->
+    Person
   deriving (Show)
 
 data Address where
@@ -1235,7 +1361,9 @@ data Address where
 
 data StreetAddress where
   StreetAddress ::
-    {_streetNumber ∷ String, _streetName ∷ String} ->
+    { _streetNumber ∷ String,
+      _streetName ∷ String
+    } ->
     StreetAddress
   deriving (Show)
 
@@ -1275,9 +1403,11 @@ setStreetNumber newStreetAddress person =
               }
         }
 
+e067 ∷ Person
+e067 = setStreetNumber "221A" sherlock
+
 -- |
--- Does it even work? Yes - at least something.
--- >>> setStreetNumber "221A" sherlock
+-- >>> e067
 -- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
 
 --------------------------------
@@ -1315,8 +1445,11 @@ updateStreetNumber modify existingStreetAddress = existingStreetAddress {_street
 -- :t (updateAddress . updateStreetAddress . updateStreetNumber)
 -- (updateAddress . updateStreetAddress . updateStreetNumber) ∷ (String → String) → (Person → Person)
 
+e068 ∷ Person
+e068 = (updateAddress . updateStreetAddress . updateStreetNumber) (const "221A") sherlock
+
 -- |
--- >>> (updateAddress . updateStreetAddress . updateStreetNumber) (const "221A") sherlock
+-- >>> e068
 -- Person {_fullName = "S. Holmes", _address = Address {_streetAddress = StreetAddress {_streetNumber = "221A", _streetName = "Baker Street"}, _city = "London", _country = "England"}}
 
 ----------------------
@@ -1371,7 +1504,8 @@ data Wool = Wool deriving (Show)
 data Sweater = Sweater deriving (Show)
 
 data Item a where
-  Item ∷ {_material ∷ a, _amount ∷ Int} → Item a
+  Item ∷ {_material ∷ a,
+          _amount ∷ Int} → Item a
   deriving (Show)
 
 makeLenses ''Item
@@ -1386,12 +1520,13 @@ weave Wool = Sweater
 gameState ∷ (Player, Item Wool)
 gameState = (Player, Item Wool 5)
 
--- |
--- >>> over (_2 . material) weave gameState
--- (Player,Item {_material = Sweater, _amount = 5})
+-- e069
+e069 :: (Player, Item Sweater)
+e069 =over (_2 . material) weave gameState
 
--- The path specialized to our specific types.
--- (_2 . material) ∷ Lens (Player, Item Wool) (Player, Item Sweater) Wool Sweater
+-- |
+-- >>> e069
+-- (Player,Item {_material = Sweater, _amount = 5})
 
 -- Optics compose easily without much boiler-plate, so we should prefer many small precise optics rather than large bulky ones!
 
@@ -1427,7 +1562,7 @@ gameState = (Player, Item Wool 5)
 
 -- Lens Platypus BabySloth Armadillo Hedgehog
 
--- 4. Find a way to compose ALL of the following lensees together into one big path using each exactly once. What's the type of the resulting lens?
+-- 4. Find a way to compose ALL of the following lenses together into one big path using each exactly once. What's the type of the resulting lens?
 
 -- spuzorktrowmble   ∷ Lens Chumble      Spuzz      Gazork       Trowlg
 -- gazorlglesnatchka ∷ Lens Gazork       Trowlg     Bandersnatch Yakka
@@ -1449,7 +1584,7 @@ gameState = (Player, Item Wool 5)
 -- resultingLens = snajubjumwock . boowockugwup . gruggazinkoom . zinkattumblezz . spuzorktrowmble . gazorlglesnatchka . banderyakoobog
 
 --------------------------------------------------------------------------------------------
---                                       Operators                                        --
+--                                    5. Operators                                        --
 --------------------------------------------------------------------------------------------
 
 --------------------
@@ -7885,7 +8020,9 @@ makeFields ''EnvDb
 
 data People where
   People ::
-    {_personName ∷ String, _favouriteFood ∷ String} ->
+    { _personName ∷ String,
+      _favouriteFood ∷ String
+    } ->
     People
   deriving (Show)
 
