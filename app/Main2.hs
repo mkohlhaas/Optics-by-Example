@@ -37,6 +37,30 @@ import Init
 import Numeric.Lens (adding, dividing, multiplying, negated)
 import Text.Printf (printf)
 
+--  Table of Contents
+--
+--  1. Obligatory Preamble
+--  2. Optics
+--  3. Lenses
+--  4. Polymorphic Optics
+--  5. Operators
+--  6. Folds
+--  7. Traversals
+--  8. Indexable Structures
+--  9. Prisms
+-- 10. Isos
+-- 11. Indexed Optics
+-- 12. Dealing with Type Errors
+-- 13. Optics and Monads
+-- 14. Classy Lenses
+-- 15. JSON
+-- 16. Uniplate - Manipulating recursive data
+-- 17. generic-lens
+-- 18. Appendices
+-- 19. Answers to Exercises
+-- 20. Thanks
+-- Notes
+
 --------------------------------------------------------------------------------------------
 --                                      2. Optics                                         --
 --------------------------------------------------------------------------------------------
@@ -1444,7 +1468,6 @@ updateStreetNumber modify existingStreetAddress = existingStreetAddress {_street
 -- Composing three updaters.
 -- :t (updateAddress . updateStreetAddress . updateStreetNumber)
 -- (updateAddress . updateStreetAddress . updateStreetNumber) ∷ (String → String) → (Person → Person)
-
 e068 ∷ Person
 e068 = (updateAddress . updateStreetAddress . updateStreetNumber) (const "221A") sherlock
 
@@ -1504,8 +1527,11 @@ data Wool = Wool deriving (Show)
 data Sweater = Sweater deriving (Show)
 
 data Item a where
-  Item ∷ {_material ∷ a,
-          _amount ∷ Int} → Item a
+  Item ::
+    { _material ∷ a,
+      _amount ∷ Int
+    } ->
+    Item a
   deriving (Show)
 
 makeLenses ''Item
@@ -1521,8 +1547,8 @@ gameState ∷ (Player, Item Wool)
 gameState = (Player, Item Wool 5)
 
 -- e069
-e069 :: (Player, Item Sweater)
-e069 =over (_2 . material) weave gameState
+e069 ∷ (Player, Item Sweater)
+e069 = over (_2 . material) weave gameState
 
 -- |
 -- >>> e069
@@ -1597,12 +1623,16 @@ e069 =over (_2 . material) weave gameState
 -- set        | .∼       | Lens s t a b → b → s → t
 -- over       | %∼       | Lens s t a b → (a → b) → s → t
 
---------------------
--- view a.k.a. ^. --
---------------------
+----------------------
+-- `view` a.k.a. ^. --
+----------------------
 
 data Payload where
-  Payload ∷ {_weightKilos ∷ Int, _cargo ∷ String} → Payload
+  Payload ::
+    { _weightKilos ∷ Int,
+      _cargo ∷ String
+    } ->
+    Payload
   deriving (Show)
 
 newtype Boat = Boat {_payload ∷ Payload} deriving (Show)
@@ -1613,55 +1643,71 @@ makeLenses ''Boat
 serenity ∷ Boat
 serenity = Boat (Payload 50000 "Livestock")
 
+-- e070
+e070 ∷ String
+e070 = view (payload . cargo) serenity
+
 -- |
--- >>> view (payload . cargo) serenity
+-- >>> e070
 -- "Livestock"
 
+-- `^.` is the FLIPPED version of `view`
+e071 ∷ String
+e071 = serenity ^. payload . cargo
+
 -- |
--- ^. is the FLIPPED version of `view`.
--- >>> serenity ^. payload . cargo
+-- >>> e071
 -- "Livestock"
 
--- |
--- Looks more like Object Oriented property access.
--- >>> serenity^.payload.cargo
--- "Livestock"
+---------------------
+-- `set` a.k.a. .∼ --
+---------------------
 
--------------------
--- set a.k.a. .∼ --
--------------------
+e072 ∷ Boat
+e072 = set (payload . cargo) "Medicine" serenity
 
 -- |
--- >>> set (payload . cargo) "Medicine" serenity
+-- >>> e072
 -- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
 
+-- e073
+e073 ∷ Boat
+e073 = serenity & payload . cargo .~ "Medicine"
+
 -- |
--- >>> serenity & payload . cargo .~ "Medicine"
+-- >>> e073
 -- Boat {_payload = Payload {_weightKilos = 50000, _cargo = "Medicine"}}
 
 ------------------------------
 -- Chaining Many Operations --
 ------------------------------
 
--- |
--- Using traditional actions names.
--- >>> serenity & set (payload . cargo) "Chocolate" & set (payload . weightKilos) 2310
--- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+e074 ∷ Boat
+e074 = serenity & set (payload . cargo) "Chocolate" & set (payload . weightKilos) 2310
 
 -- |
+-- >>> e074
+-- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
+
 -- Using operators.
--- >>> serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
+e075 ∷ Boat
+e075 = serenity & payload . cargo .~ "Chocolate" & payload . weightKilos .~ 2310
+
+-- |
+-- >>> e075
 -- Boat {_payload = Payload {_weightKilos = 2310, _cargo = "Chocolate"}}
 
---------------------------
--- Using %∼ a.k.a. over --
---------------------------
+----------------------
+-- `%∼` a.k.a. over --
+----------------------
 
 -- % is often the MOD-ulo operator, and `over` MOD-ifies its focus.
 
+e076 ∷ Boat
+e076 = serenity & payload . weightKilos %~ subtract 1000 & payload . cargo .~ "Chocolate"
+
 -- |
--- %~ = over
--- >>> serenity & payload . weightKilos %~ subtract 1000 & payload . cargo .~ "Chocolate"
+-- >>> e076
 -- Boat {_payload = Payload {_weightKilos = 49000, _cargo = "Chocolate"}}
 
 ----------------------------
@@ -1712,36 +1758,56 @@ serenity = Boat (Payload 50000 "Livestock")
 --                                                                  --
 -- -------------------------------------------------------------------
 
+-- e077
+e077 ∷ (Integer, Integer)
+e077 = (2, 30) & _2 +~ 5
+
 -- |
--- >>> (2, 30) & _2 +~ 5
+-- >>> e077
 -- (2,35)
 
+-- e078
+e078 ∷ (Integer, Integer)
+e078 = (2, 30) & _2 -~ 5
+
 -- |
--- >>> (2, 30) & _2 -~ 5
+-- >>> e078
 -- (2,25)
+e079 ∷ (Integer, Integer)
+e079 = (2, 30) & _2 *~ 5
 
 -- |
--- >>> (2, 30) & _2 *~ 5
+-- >>> e079
 -- (2,150)
+e080 ∷ (Integer, Double)
+e080 = (2, 30) & _2 //~ 5
 
 -- |
--- >>> (2, 30) & _2 //~ 5
+-- >>> e080
 -- (2,6.0)
+e081 ∷ (Integer, Integer)
+e081 = (2, 30) & _1 ^~ 3
 
 -- |
--- >>> (2, 30) & _1 ^~ 3
+-- >>> e081
 -- (8,30)
+e082 ∷ (Bool, Integer)
+e082 = (False, 30) & _1 ||~ True
 
 -- |
--- >>> (False, 30) & _1 ||~ True
+-- >>> e082
 -- (True,30)
+e083 ∷ (Bool, Integer)
+e083 = (True, 30) & _1 &&~ True
 
 -- |
--- >>> (True, 30) & _1 &&~ True
+-- >>> e083
 -- (True,30)
+e084 ∷ (String, Integer)
+e084 = ("abra", 30) & _1 <>~ "cadabra"
 
 -- |
--- >>> ("abra", 30) & _1 <>~ "cadabra"
+-- >>> e084
 -- ("abracadabra",30)
 
 ---------------
@@ -1755,44 +1821,64 @@ newtype Thermometer = Thermometer
 
 makeLenses ''Thermometer
 
+e085 ∷ Thermometer
+e085 = Thermometer 20 & temperature +~ 15
+
 -- |
--- >>> Thermometer 20 & temperature +~ 15
+-- >>> e085
 -- Thermometer {_temperature = 35}
 
--- |
 -- Get new focus.
 -- `<` = get the NEW focus in addition to modification
--- >>> Thermometer 20 & temperature <+~ 15
--- (35,Thermometer {_temperature = 35})
+e086 ∷ (Int, Thermometer)
+e086 = Thermometer 20 & temperature <+~ 15
 
 -- |
+-- >>> e086
+-- (35,Thermometer {_temperature = 35})
+
 -- Get old focus.
 -- `<<` = get the OLD focus in addition to modification
--- >>> Thermometer 20 & temperature <<+~ 15
+e087 ∷ (Int, Thermometer)
+e087 = Thermometer 20 & temperature <<+~ 15
+
+-- |
+-- >>> e087
 -- (20,Thermometer {_temperature = 35})
 
 ---------------------------------------------
 -- When to use operators vs named actions? --
 ---------------------------------------------
 
--- Author finds it nicer to use the named versions when PARTIALLY APPLYING lens expressions, and use the operator versions the rest of the time.
+-- Author suggests to use the named versions when PARTIALLY APPLYING lens expressions, and use the operator versions the rest of the time.
+
+e088 ∷ [String]
+e088 = map (view _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
 
 -- |
--- >>> map (view _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- >>> e088
 -- ["Star","SquarePants"]
 
--- |
 -- Author thinks this looks a bit stupid.
--- >>> map (^. _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
--- ["Star","SquarePants"]
+e089 ∷ [String]
+e089 = map (^. _2) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
 
 -- |
--- >>> map (over _2 reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+-- >>> e089
+-- ["Star","SquarePants"]
+e090 ∷ [(String, String)]
+e090 = map (over _2 reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+
+-- |
+-- >>> e090
 -- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
 
--- |
 -- Author thinks this looks a bit stupid.
--- >>> map (_2 %~ reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+e091 ∷ [(String, String)]
+e091 = map (_2 %~ reverse) [("Patrick", "Star"), ("SpongeBob", "SquarePants")]
+
+-- |
+-- >>> e091
 -- [("Patrick","ratS"),("SpongeBob","stnaPerauqS")]
 
 ---------------------------
@@ -1802,16 +1888,27 @@ makeLenses ''Thermometer
 -- 1. Consider the following list of types:
 
 data Gate where
-  Gate ∷ {_open ∷ Bool, _oilTemp ∷ Float} → Gate
+  Gate ::
+    { _open ∷ Bool,
+      _oilTemp ∷ Float
+    } ->
+    Gate
   deriving (Show)
 
 data Army where
-  Army ∷ {_archers ∷ Int, _knights ∷ Int} → Army
+  Army ::
+    { _archers ∷ Int,
+      _knights ∷ Int
+    } ->
+    Army
   deriving (Show)
 
 data Kingdom where
   Kingdom ::
-    {_kname ∷ String, _army ∷ Army, _gate ∷ Gate} ->
+    { _kname ∷ String,
+      _army ∷ Army,
+      _gate ∷ Gate
+    } ->
     Kingdom
   deriving (Show)
 
@@ -1878,18 +1975,18 @@ duloc =
 -- %∼ ∷ Lens  s t a b → (a → b) → s → t
 
 --------------------------------------------------------------------------------------------
---                                         Folds                                          --
+--                                      6. Folds                                          --
 --------------------------------------------------------------------------------------------
 
----------------------------
--- Introduction to Folds --
----------------------------
+-------------------------------
+-- 6.1 Introduction to Folds --
+-------------------------------
 
 -- Folds are like queries.
 
 -- The key differences between lenses and folds are that:
--- • Lenses must focus ONE thing, Folds can focus MANY things
--- • Lenses can get and set, Folds can ONLY get.
+-- 1. Lenses must focus ONE thing, Folds can focus MANY things
+-- 2. Lenses can get and set, Folds can ONLY get.
 
 ------------------------------------------
 -- Focusing All Elements of a Container --
@@ -1928,11 +2025,13 @@ roster =
 -- Collapsing the Set --
 ------------------------
 
--- Generic type of a fold.
+-- Generic type of a fold:
+--
+-- Fold s a
+--
 -- This type says that if you give us a structure of type `s` we can find zero or more focuses of type `a`.
 -- Note that a fold only specifies how to find the focuses, not how to combine them!!!
 -- The decision of how to mix them all together is left up to the action.
--- Fold s a
 
 crewMembers ∷ Fold (Set CrewMember) CrewMember
 crewMembers = folded
@@ -1948,32 +2047,52 @@ crewMembers = folded
 -- toListOf ∷ Fold s a → s → [a]
 -- (^..) ∷ s → Fold s a → [a]
 
+e092 ∷ [CrewMember]
+e092 = roster ^.. crewMembers
+
 -- |
--- >>> roster ^.. crewMembers
+-- >>> e092
 -- [CrewMember {_crewMemberName = "Grumpy Roger", _role = Gunner, _talents = ["Juggling","Arbitrage"]},CrewMember {_crewMemberName = "Long-John Bronze", _role = PowderMonkey, _talents = ["Origami"]},CrewMember {_crewMemberName = "One-eyed Jack", _role = Navigator, _talents = []},CrewMember {_crewMemberName = "Salty Steve", _role = PowderMonkey, _talents = ["Charcuterie"]}]
 
--- |
 -- `Maybe` is Foldable!
--- >>> Just "Buried Treasure" ^.. folded
+e093 ∷ [String]
+e093 = Just "Buried Treasure" ^.. folded
+
+-- |
+-- >>> e093
 -- ["Buried Treasure"]
 
--- |
 -- `folded` might focus zero elements
--- >>> Nothing ^.. folded
+e094 ∷ [a]
+e094 = Nothing ^.. folded
+
+-- |
+-- >>> e094
 -- []
 
--- |
--- >>> Identity "Cutlass" ^.. folded
--- ["Cutlass"]
+-- e095
+e095 ∷ [String]
+e095 = Identity "Cutlass" ^.. folded
 
 -- |
--- Remember that the Foldable instance of tuple only focuses the right-hand value
--- >>> ("Rubies", "Gold") ^.. folded
+-- >>> e095
+-- ["Cutlass"]
+
+-- The Foldable instance of tuple only focuses the right-hand value.
+e096 ∷ [String]
+e096 = ("Rubies", "Gold") ^.. folded
+
+-- |
+-- >>> e096
 -- ["Gold"]
 
 -- |
--- Folding a Map focuses only the values not the keys
--- >>> M.fromList [("Jack", "Captain"), ("Will", "First Mate")] ^.. folded
+-- Folding a Map focuses only the values not the keys.
+e097 ∷ [String]
+e097 = M.fromList [("Jack", "Captain"), ("Will", "First Mate")] ^.. folded
+
+-- |
+-- >>> e097
 -- ["Captain","First Mate"]
 
 ---------------------------
@@ -1989,6 +2108,7 @@ crewRole = role
 -- `Lens' s a` becomes `Fold s a`
 
 -- |
+-- TODO: ??? Where is crewRole
 -- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
 -- >>> jerry ^. role
 -- PowderMonkey
