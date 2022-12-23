@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE StrictData #-}
 
 -- {-# OPTIONS_GHC -ddump-splices #-}
@@ -8,36 +9,196 @@ module Main where
 import Control.Applicative (Applicative (liftA2), ZipList (ZipList), (<|>))
 import Control.Arrow ((>>>))
 import Control.Lens
+  ( AsEmpty (_Empty),
+    At (..),
+    Each (each),
+    Field1 (_1),
+    Field2 (_2),
+    Field3 (_3),
+    Fold,
+    Identity (Identity),
+    Index,
+    Indexable (indexed),
+    Indexed,
+    IndexedFold,
+    IndexedTraversal,
+    Iso,
+    Iso',
+    IxValue,
+    Ixed (..),
+    Lens,
+    Lens',
+    Magnify (magnify),
+    Prism,
+    Prism',
+    Traversal,
+    Traversal',
+    Zoom (zoom),
+    allOf,
+    anyOf,
+    backwards,
+    beside,
+    both,
+    cloneIndexPreservingLens,
+    coerced,
+    dimapping,
+    dropping,
+    droppingWhile,
+    elemOf,
+    element,
+    elementOf,
+    enum,
+    failing,
+    failover,
+    filtered,
+    filteredBy,
+    findOf,
+    firstOf,
+    flipped,
+    foldByOf,
+    foldMapByOf,
+    foldMapOf,
+    foldOf,
+    folded,
+    folding,
+    forOf_,
+    from,
+    has,
+    hasn't,
+    icompose,
+    ifolding,
+    index,
+    indexing,
+    indices,
+    involuted,
+    isn't,
+    iso,
+    itoListOf,
+    itraverseOf_,
+    itraversed,
+    lastOf,
+    lengthOf,
+    lens,
+    lined,
+    makeClassy,
+    makeFields,
+    makeLenses,
+    makePrisms,
+    makeWrapped,
+    mapping,
+    matching,
+    maximumByOf,
+    maximumOf,
+    minimumByOf,
+    minimumOf,
+    non,
+    only,
+    outside,
+    over,
+    partsOf,
+    pre,
+    prefixed,
+    preview,
+    prism,
+    prism',
+    productOf,
+    reindexed,
+    reversed,
+    review,
+    sans,
+    selfIndex,
+    sequenceAOf,
+    set,
+    sumOf,
+    swapped,
+    taking,
+    takingWhile,
+    to,
+    toListOf,
+    traverseOf,
+    traverseOf_,
+    traversed,
+    uncurried,
+    unsafePartsOf,
+    use,
+    uses,
+    view,
+    worded,
+    (#),
+    (%%~),
+    (%@~),
+    (%~),
+    (&),
+    (&&~),
+    (*~),
+    (+=),
+    (+~),
+    (-~),
+    (.=),
+    (.~),
+    (//~),
+    (<+~),
+    (<.),
+    (<.>),
+    (<<+~),
+    (<<>~),
+    (<>=),
+    (<>~),
+    (<~),
+    (?~),
+    (^.),
+    (^..),
+    (^?),
+    (^@..),
+    (^~),
+    _Cons,
+    _Just,
+    _Left,
+    _Nothing,
+    _Right,
+    _Show,
+    _Wrapped,
+    _Wrapped',
+    _Wrapping,
+    _Wrapping',
+    _head,
+    _tail,
+    (||~),
+  )
 import Control.Lens.Extras (biplate)
 import Control.Lens.Unsound (lensProduct)
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
-import Control.Monad.State
+import Control.Monad.State (MonadIO (..), StateT, evalState, execState, execStateT, get, modify)
 import DB
 import DBClassy
 import Data.Bits.Lens (bitAt)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as B
 import Data.Char (isAlpha, isNumber, isUpper, toLower, toUpper)
 import Data.Coerce (coerce)
 import Data.Either.Validation (Validation (..))
 import Data.Foldable (for_, toList)
 import Data.Function (on)
-import Data.List (elemIndex, intercalate, nub, sort, sortOn, stripPrefix, transpose)
+import Data.List (elemIndex, find, intercalate, nub, sort, sortOn, stripPrefix, transpose)
 import qualified Data.List.NonEmpty as NE
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
-import Data.Monoid (Sum (Sum))
+import Data.Monoid (Dual (Dual), Sum (Sum))
 import Data.Ord (comparing)
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
 import Data.Tree (Tree (Node))
-import Init
+import GHC.Word (Word8)
+import Init (HasHName (..), HasPNumber (..), initialisieren)
 import Numeric.Lens (adding, dividing, multiplying, negated)
 import Text.Printf (printf)
+import Text.Read (readMaybe)
 
---  Table of Contents
+--  Table of Contents (TOC)
 --
 --  1. Obligatory Preamble
 --  2. Optics
@@ -218,6 +379,11 @@ e015 = foldOf (both . each) (["super", "cali"], ["fragilistic", "expialidocious"
 -- >>> e015
 -- "supercalifragilisticexpialidocious"
 
+-- |
+-- Monoid instance shines trough, sometimes folding with view works, sometimes not! (p. 105, "Using `view` on Folds")
+-- >>> (["super", "cali"], ["fragilistic", "expialidocious"]) ^. both . each
+-- "supercalifragilisticexpialidocious"
+
 -------------------------------
 -- Exercises - Optic Anatomy --
 -------------------------------
@@ -372,10 +538,10 @@ makeLenses ''Ship
 
 -- from splices dump (cleaned)
 -- numCrew ∷ Lens' Ship Int
--- numCrew f (Ship x1 x2) = fmap Ship x1 (f x2)
+-- numCrew f (Ship amt x2) = fmap Ship amt (f x2)
 --
 -- shipName ∷ Lens' Ship String
--- shipName f (Ship x1 x2) = fmap (`Ship` x2) (f x1)
+-- shipName f (Ship amt x2) = fmap (`Ship` x2) (f amt)
 
 -- from the book
 -- `makeLenses` creates the following lenses using `lens`:
@@ -2035,7 +2201,6 @@ roster =
 
 crewMembers ∷ Fold (Set CrewMember) CrewMember
 crewMembers = folded
-
 -- `folded` takes ANY Foldable container as a structure and will focus each element inside it.
 -- folded ∷ Foldable f ⇒ Fold (f a) a
 
@@ -2046,6 +2211,8 @@ crewMembers = folded
 -- toListOf and its flipped operator (^..) returns a list of focuses rather than a single focus, like `view` (^.)
 -- toListOf ∷ Fold s a → s → [a]
 -- (^..) ∷ s → Fold s a → [a]
+
+-- ^ .. needs a Fold!
 
 e092 ∷ [CrewMember]
 e092 = roster ^.. crewMembers
@@ -2101,43 +2268,48 @@ e097 = M.fromList [("Jack", "Captain"), ("Will", "First Mate")] ^.. folded
 
 -- Lenses can be used directly as folds!!!
 -- You can drop in a lens anywhere you need a fold.
-crewRole ∷ Fold CrewMember Role
-crewRole = role
 
 -- When we use a lens as a fold we can mentally substitute the types like this:
 -- `Lens' s a` becomes `Fold s a`
 
+-- e098
+e098 ∷ [Role]
+e098 =
+  let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+   in jerry ^.. role
+
 -- |
--- TODO: ??? Where is crewRole
--- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
--- >>> jerry ^. role
+-- >>> e098
+-- [PowderMonkey]
+
+-- comparing with `view`
+e099 ∷ Role
+e099 =
+  let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+   in jerry ^. role
+
+-- |
+-- >>> e099
 -- PowderMonkey
 
 ---------------------
 -- Composing Folds --
 ---------------------
 
--- |
--- >>> roster ^.. folded . role
--- [Gunner,PowderMonkey,Navigator,PowderMonkey]
+e100 ∷ [Role]
+e100 = roster ^.. folded . role
 
 -- |
--- crewMembers ∷ Fold (Set CrewMember) CrewMember
--- crewRole    ∷ Fold CrewMember Role
--- composes to → Fold (Set CrewMember) Role
--- Applying (^..) (`toListOf`):
--- (^..) ∷ s → Fold s a → [a]
--- Set CrewMember → Fold (Set CrewMember) Role → [Role]
--- >>> roster ^.. crewMembers . crewRole
+-- >>> e100
 -- [Gunner,PowderMonkey,Navigator,PowderMonkey]
+e101 ∷ [Role]
+e101 =
+  let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
+   in jerry ^.. role
 
 -- |
--- >>> let jerry = CrewMember "Jerry" PowderMonkey ["Ice Cream Making"]
--- >>> jerry ^.. role
+-- >>> e101
 -- [PowderMonkey]
-
--- When we use a `lens` as a `fold` we can mentally substitute the types like this:
--- `Lens' s a` becomes `Fold s a`
 
 -----------------------------------
 -- Foundational Fold Combinators --
@@ -2148,33 +2320,60 @@ crewRole = role
 -- `both` allows us to fold over BOTH parameters when the parameters are the SAME!
 -- `each` allows us to fold over ALL  parameters when the parameters are the SAME!
 
--- |
 -- `both` on tuples focuses both at once
--- >>> ("Gemini", "Leo") ^.. both
+e102 ∷ [String]
+e102 = ("Gemini", "Leo") ^.. both
+
+-- |
+-- >>> e102
 -- ["Gemini","Leo"]
 
+-- compare
+e103 ∷ [String]
+e103 = ("Gemini", "Leo") ^.. folded
+
 -- |
+-- >>> e103
+-- ["Leo"]
+
 -- `both` on an Either type focuses whichever side is present
--- >>> Left "Albuquerque" ^.. both
+e104 ∷ [String]
+e104 = Left "Albuquerque" ^.. both
+
+-- |
+-- >>> e104
 -- ["Albuquerque"]
 
+-- e105
+e105 ∷ [String]
+e105 = Right "Yosemite" ^.. both
+
 -- |
--- >>> Right "Yosemite" ^.. both
+-- >>> e105
 -- ["Yosemite"]
 
--- |
 -- Only the last two type params of a tuple are 'bitraversable'
--- >>> ("Gemini", "Leo", "Libra") ^.. both
+e106 ∷ [String]
+e106 = ("Gemini", "Leo", "Libra") ^.. both
+
+-- |
+-- >>> e106
 -- ["Leo","Libra"]
 
--- |
--- There's an `Each` instance for all reasonable sizes of tuples
--- >>> (1, 2, 3, 4, 5) ^.. each
--- [1,2,3,4,5]
+-- if you want all members you need `each`
+e107 ∷ [String]
+e107 = ("Gemini", "Leo", "Libra") ^.. each
 
 -- |
--- Selects each element of a list
--- >>> [1, 2, 3, 4, 5] ^.. each
+-- >>> e107
+-- ["Gemini","Leo","Libra"]
+
+-- selects each element of a list
+e108 ∷ [Integer]
+e108 = [1, 2, 3, 4, 5] ^.. each
+
+-- |
+-- >>> e108
 -- [1,2,3,4,5]
 
 ------------------------------
@@ -2186,62 +2385,106 @@ crewRole = role
 beastSizes ∷ [(Int, String)]
 beastSizes = [(3, "Sirens"), (882, "Kraken"), (92, "Ogopogo")]
 
+-- e109
+e109 ∷ [(Int, String)]
+e109 = beastSizes ^.. folded
+
 -- |
--- >>> beastSizes ^.. folded
+-- >>> e109
 -- [(3,"Sirens"),(882,"Kraken"),(92,"Ogopogo")]
+e110 ∷ [String]
+e110 = beastSizes ^.. folded . folded
 
 -- |
--- >>> beastSizes ^.. folded . folded
+-- >>> e110
 -- ["Sirens","Kraken","Ogopogo"]
 
+-- e111
+e111 ∷ String
+e111 = beastSizes ^.. folded . folded . folded
+
 -- |
--- >>> beastSizes ^.. folded . folded . folded
+-- >>> e111
 -- "SirensKrakenOgopogo"
+e112 ∷ [String]
+e112 = beastSizes ^.. folded . _2
 
 -- |
--- >>> beastSizes ^.. folded . _2
+-- >>> e112
 -- ["Sirens","Kraken","Ogopogo"]
 
+-- e113
+e113 ∷ [[Integer]]
+e113 = toListOf folded [[1, 2, 3], [4, 5, 6]]
+
 -- |
--- >>> toListOf folded [[1, 2, 3], [4, 5, 6]]
+-- >>> e113
 -- [[1,2,3],[4,5,6]]
 
+-- e114
+e114 ∷ [Integer]
+e114 = toListOf (folded . folded) [[1, 2, 3], [4, 5, 6]]
+
 -- |
--- >>> toListOf (folded . folded) [[1, 2, 3], [4, 5, 6]]
+-- >>> e114
 -- [1,2,3,4,5,6]
 
+-- e115
+e115 ∷ String
+e115 = toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+
 -- |
--- >>> toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+-- >>> e115
 -- "CaptainFirst Mate"
 
--- |
--- >>> ("Hello", "It's me") ^.. both . folded
--- "HelloIt's me"
+-- e116
+e116 ∷ String
+e116 = ("Hello", "It's me") ^.. both . folded
 
 -- |
--- >>> ("Why", "So", "Serious?") ^.. each
+-- >>> e116
+-- "HelloIt's me"
+
+-- e117
+e117 ∷ [String]
+e117 = ("Why", "So", "Serious?") ^.. each
+
+-- |
+-- >>> e117
 -- ["Why","So","Serious?"]
 quotes ∷ [(String, String, String)]
 quotes = [("Why", "So", "Serious?"), ("This", "is", "SPARTA")]
 
+-- e118
+e118 ∷ [(String, String, String)]
+e118 = quotes ^.. each
+
 -- |
--- >>> quotes ^.. each
+-- >>> e118
 -- [("Why","So","Serious?"),("This","is","SPARTA")]
+e119 ∷ [String]
+e119 = quotes ^.. each . each
 
 -- |
--- >>> quotes ^.. each . each
+-- >>> e119
 -- ["Why","So","Serious?","This","is","SPARTA"]
+e120 ∷ String
+e120 = quotes ^.. each . each . each
 
 -- |
--- >>> quotes ^.. each . each . each
+-- >>> e120
 -- "WhySoSerious?ThisisSPARTA"
 
 -- 2. Write out the specialized type for each of the requested combinators used in each of the following expressions.
 
 -- a) folded, _1, toListOf
 
+-- e121
+e121 ∷ [Integer]
+e121 = toListOf (folded . _1) [(1, 'a'), (2, 'b'), (3, 'c')]
+
 -- |
--- >>> toListOf (folded . _1) [(1, 'a'), (2, 'b'), (3, 'c')]
+-- >>> e121
 -- [1,2,3]
 
 -- folded ∷ Fold [(Int, Char)] (Int, Char)
@@ -2250,8 +2493,12 @@ quotes = [("Why", "So", "Serious?"), ("This", "is", "SPARTA")]
 
 -- b) _2, folded, toListOf
 
+-- e122
+e122 ∷ [String]
+e122 = toListOf (_2 . folded) (False, S.fromList ["one", "two", "three"])
+
 -- |
--- >>> toListOf (_2 . folded) (False, S.fromList ["one", "two", "three"])
+-- >>> e122
 -- ["one","three","two"]
 
 -- _2 ∷ Fold (Bool, Set String) (Set String)
@@ -2260,8 +2507,12 @@ quotes = [("Why", "So", "Serious?"), ("This", "is", "SPARTA")]
 
 -- c) folded, folded, toListOf
 
+-- e123
+e123 ∷ String
+e123 = toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+
 -- |
--- >>> toListOf (folded . folded) (M.fromList [("Jack", "Captain"), ("Will", "First Mate")])
+-- >>> e123
 -- "CaptainFirst Mate"
 
 -- folded ∷ Fold (Map String String) String
@@ -2290,37 +2541,68 @@ quotes = [("Why", "So", "Serious?"), ("This", "is", "SPARTA")]
 
 -- Solutions:
 
+-- e124
+e124 ∷ [Integer]
+e124 = [1, 2, 3] ^.. folded
+
 -- |
--- >>> [1, 2, 3] ^.. folded
+-- >>> e124
 -- [1,2,3]
 
--- >>> ("Light", "Dark") ^.. _1
+-- e125
+e125 ∷ [String]
+e125 = ("Light", "Dark") ^.. _1
+
+-- |
+-- >>> e125
 -- ["Light"]
 
+-- e126
+e126 ∷ [String]
+e126 = [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . both
+
 -- |
--- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . both
+-- >>> e126
 -- ["Light","Dark","Happy","Sad"]
 
+-- e127
+e127 ∷ [String]
+e127 = [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . each
+
 -- |
--- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . _1
+-- >>> e127
+-- ["Light","Dark","Happy","Sad"]
+
+-- e128
+e128 ∷ [String]
+e128 = [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . _1
+
+-- |
+-- >>> e128
 -- ["Light","Happy"]
 
--- |
--- >>> [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . folded . folded
--- "DarkSad"
+-- e129
+e129 ∷ String
+e129 = [("Light", "Dark"), ("Happy", "Sad")] ^.. folded . folded . folded
 
 -- |
--- >>> ("Bond", "James", "Bond") ^.. each
+-- >>> e129
+-- "DarkSad"
+e130 ∷ [String]
+e130 = ("Bond", "James", "Bond") ^.. each
+
+-- |
+-- >>> e130
 -- ["Bond","James","Bond"]
 
-------------------
--- Custom Folds --
-------------------
+----------------------
+-- 6.2 Custom Folds --
+----------------------
 
 newtype Name = Name {getName ∷ String}
   deriving (Show)
 
--- Not foldable, not even having a type parameter!
+-- Not foldable, not even having a type parameter.
 data ShipCrew where
   ShipCrew ::
     { _ship ∷ Name,
@@ -2358,53 +2640,67 @@ myCrew =
       _conscripts = [Name "One-eyed Jack", Name "Filthy Frank"]
     }
 
+-- e131
+e131 ∷ [Name]
+e131 = myCrew ^.. allCrewMembers
+
 -- |
--- >>> myCrew ^.. allCrewMembers
+-- >>> e131
 -- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
 
 ------------------------
 -- Mapping over Folds --
 ------------------------
 
--- ------------------------------------------------------------------------------------------------------------------------------------
--- RULE: Prefer many small and precise combinators which can be composed in different combinations to solve many different problems! --
---       Stay in the Optics world - it's very composable and resusable!
--- ------------------------------------------------------------------------------------------------------------------------------------
-
 -- The `to` helper is pretty simple, it converts a function directly into a fold!
 -- to ∷ (s → a) → Fold s a
 -- It's like mapping over the Fold.
 
+-- `to` allows us to easily interleave function transformations into a path of composed optics
+e132 ∷ [String]
+e132 = myCrew ^.. allCrewMembers . to getName
+
 -- |
--- >>> Name "Two-faced Tony" ^. to getName
+-- >>> e132
+-- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
+
+-- e133
+e133 ∷ String
+e133 = Name "Two-faced Tony" ^. to getName
+
+-- |
+-- >>> e133
 -- "Two-faced Tony"
 
--- |
 -- We can chain many `to`s in a row
--- >>> Name "Two-faced Tony" ^. to getName . to (fmap toUpper)
--- "TWO-FACED TONY"
+e134 ∷ String
+e134 = Name "Two-faced Tony" ^. to getName . to (fmap toUpper)
 
 -- |
--- Or simply use function composition before passing to `to`.
--- However, I find it confusing to switch from reading left-to-right into right-to-left like this:
--- >>> Name "Two-faced Tony" ^. to (fmap toUpper . getName)
+-- >>> e134
 -- "TWO-FACED TONY"
 
--- |
--- Why not?
--- >>> Name "Two-faced Tony" ^. to (getName >>> fmap toUpper)
--- "TWO-FACED TONY"
+-- e135
+e135 ∷ String
+e135 = Name "Two-faced Tony" ^. to (fmap toUpper . getName)
 
 -- |
--- `to` allows us to easily interleave function transformations into a path of composed optics.
--- >>> myCrew ^.. allCrewMembers . to getName
--- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
+-- >>> e135
+-- "TWO-FACED TONY"
+
+-- reading from left to right throughout
+e136 ∷ String
+e136 = Name "Two-faced Tony" ^. to (getName >>> fmap toUpper)
+
+-- |
+-- >>> e136
+-- "TWO-FACED TONY"
 
 ----------------------------------------------------
 -- Combining Multiple Folds on the Same Structure --
 ----------------------------------------------------
 
--- Every lens is a valid fold.
+-- Every lens is a valid fold!
 crewNames ∷ Fold ShipCrew Name
 crewNames =
   folding
@@ -2415,7 +2711,34 @@ crewNames =
     )
 
 -- |
+-- compare `^.` and `^..`
+-- >>> myCrew ^. captain
+-- Name {getName = "Grumpy Roger"}
+
+-- |
+-- >>> myCrew ^.. captain
+-- [Name {getName = "Grumpy Roger"}]
+
+-- |
+-- >>> myCrew ^.. firstMate
+-- [Name {getName = "Long-John Bronze"}]
+
+-- |
+-- >>> myCrew ^.. conscripts . folded
+-- [Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
+
+-- |
+-- >>> myCrew ^.. crewNames
+-- [Name {getName = "Grumpy Roger"},Name {getName = "Long-John Bronze"},Name {getName = "One-eyed Jack"},Name {getName = "Filthy Frank"}]
+
+-- |
 -- >>> myCrew ^.. crewNames . to getName
+-- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
+e137 ∷ [String]
+e137 = myCrew ^.. crewNames . to getName
+
+-- |
+-- >>> e137
 -- ["Grumpy Roger","Long-John Bronze","One-eyed Jack","Filthy Frank"]
 
 ------------------------------
@@ -2427,6 +2750,9 @@ crewNames =
 -- >>> ["Yer", "a", "wizard", "Harry"] ^.. folded . _
 -- "YerawizardHarry"
 
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . _
+-- [1,2,3,4,5,6]
+
 -- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . _ (take 2)
 -- [1, 2, 4, 5]
 
@@ -2436,7 +2762,7 @@ crewNames =
 -- >>> ["bob", "otto", "hannah"] ^.. folded . _ reverse
 -- ["bob", "otto", "hannah"]
 
--- >>> ("abc", "def") ^.. _ (\(a, b) → [a, b]). _ reverse . _
+-- >>> ("abc", "def") ^.. _ (\(a, b) → [a, b]) . _ reverse . _
 -- "cbafed"
 
 -- Solutions:
@@ -2444,6 +2770,10 @@ crewNames =
 -- |
 -- >>> ["Yer", "a", "wizard", "Harry"] ^.. folded . folded
 -- "YerawizardHarry"
+
+-- |
+-- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . folded
+-- [1,2,3,4,5,6]
 
 -- |
 -- >>> [[1, 2, 3], [4, 5, 6]] ^.. folded . folding (take 2)
@@ -2464,7 +2794,7 @@ crewNames =
 -- 2. Fill in the blank for each of the following expressions with a path of folds which results in the specified answer.
 -- Avoid partial functions and fmap.
 
--- The blanks were all at the end of the expression, e.g.  "[1..5] ^.. _"
+-- The blanks have been all at the end of the expression, e.g.  "[1..5] ^.. _"
 
 -- |
 -- >>> [1..5] ^.. folded . to (* 100)
@@ -2494,6 +2824,9 @@ crewNames =
 -- >>> [1, 2, 3, 4] ^.. folded . to (\n → if odd n then Left n else Right n)
 -- [Left 1,Right 2,Left 3,Right 4]
 
+-- >>> [(1, (2, 3)), (4, (5, 6))] ^.. folded . to (\(x, (y, z)) → [x, y, z]) . folded
+-- [1,2,3,4,5,6]
+
 -- |
 -- >>> [(1, (2, 3)), (4, (5, 6))] ^.. folded . folding (\(x, (y, z)) → [x, y, z])
 -- [1,2,3,4,5,6]
@@ -2514,7 +2847,7 @@ crewNames =
 -- >>> S.fromList ["apricots", "apples"] ^.. folded . folding reverse
 -- "selppastocirpa"
 
--- See the pattern!
+-- Notice the pattern!!!
 -- to fn . folded == folding fn
 
 -- 3. BONUS - Devise a fold which returns the expected results. Think outside the box a bit.
@@ -2524,12 +2857,16 @@ crewNames =
 -- "54321"
 
 -- |
+-- >>> [(1, "a"), (2, "b"), (3, "c"), (4, "d")] ^.. folded . folding (\(x , y) → if even x then Just y else Nothing)
+-- ["b","d"]
+
+-- |
 -- >>> [(1, "a"), (2, "b"), (3, "c"), (4, "d")] ^.. folded . folding (\(x, y) → if even x then [y] else [])
 -- ["b","d"]
 
-------------------
--- Fold Actions --
-------------------
+----------------------
+-- 6.3 Fold Actions --
+----------------------
 
 --------------------------------
 -- Writing Queries with Folds --
@@ -2542,12 +2879,30 @@ crewNames =
 
 -- sumOf ∷ Num a ⇒ Getting (Endo (Endo a)) s a → s → a
 
--- It's really really not important to actually know what a Getting (Endo (Endo a)) is; I don't
+-- It's really not important to actually know what a Getting (Endo (Endo a)) is; I don't
 -- personally know the actual types of most of these actions. What I DO know though is that when
 -- I see a Getting (Some Crazy Type) s a I know I can substitute nearly any optic into that slot,
 -- including a (Fold s a) or a (Lens' s a). The “behind the scenes” types can unify themselves with
 -- the (Some Crazy Type) portion of a Getter; so usually I mentally just substitute any Getting _ s a
 -- with a Fold s a.
+
+-- >>> :type sum
+-- sum ∷ (Foldable t, Num a) ⇒ t a → a
+
+-- >>> :type sumOf
+-- sumOf ∷ Num a ⇒ Getting (Endo (Endo a)) s a → s → a
+
+-- |
+-- >>> sum [1, 2, 3, 4]
+-- 10
+
+-- |
+-- >>> sumOf folded [1, 2, 3, 4]
+-- 10
+
+-- |
+-- >>> elem 3 [1, 2, 3, 4]
+-- True
 
 -- |
 -- Does my fold contain a given element?
@@ -2555,8 +2910,16 @@ crewNames =
 -- True
 
 -- |
+-- >>> elem 99 [1, 2, 3, 4]
+-- False
+
+-- |
 -- >>> elemOf folded 99 [1, 2, 3, 4]
 -- False
+
+-- |
+-- >>> any even [1, 2, 3, 4]
+-- True
 
 -- |
 -- Do ANY focuses match a predicate?
@@ -2564,7 +2927,15 @@ crewNames =
 -- True
 
 -- |
+-- >>> any (> 10) [1, 2, 3, 4]
+-- False
+
+-- |
 -- >>> anyOf folded (> 10) [1, 2, 3, 4]
+-- False
+
+-- |
+-- >>> all even [1, 2, 3, 4]
 -- False
 
 -- |
@@ -2572,9 +2943,16 @@ crewNames =
 -- >>> allOf folded even [1, 2, 3, 4]
 -- False
 
+-- >>> all (< 10) [1, 2, 3, 4]
+-- True
+
 -- |
 -- >>> allOf folded (< 10) [1, 2, 3, 4]
 -- True
+
+-- |
+-- >>> find even [1, 2, 3, 4]
+-- Just 2
 
 -- |
 -- Find the first element matching a predicate
@@ -2582,8 +2960,16 @@ crewNames =
 -- Just 2
 
 -- |
+-- >>> find (> 10) [1, 2, 3, 4]
+-- Nothing
+
+-- |
 -- >>> findOf folded (> 10) [1, 2, 3, 4]
 -- Nothing
+
+-- |
+-- >>> not . null $ []
+-- False
 
 -- |
 -- Does my fold have any elements?
@@ -2603,14 +2989,16 @@ crewNames =
 -- False
 
 -- |
+-- >>> length [1, 2, 3, 4]
+-- 4
+
+-- |
 -- How many focuses are there?
 -- >>> lengthOf folded [1, 2, 3, 4]
 -- 4
 
--- |
--- What's the sum of my focuses?
--- >>> sumOf folded [1, 2, 3, 4]
--- 10
+-- >>> product [1, 2, 3, 4]
+-- 24
 
 -- |
 -- What's the product of my focuses?
@@ -2641,6 +3029,10 @@ crewNames =
 -- Just 4
 
 -- |
+-- >>> minimum [2, 1, 4, 3]
+-- 1
+
+-- |
 -- Find the minimum focus
 -- >>> minimumOf folded [2, 1, 4, 3]
 -- Just 1
@@ -2648,6 +3040,10 @@ crewNames =
 -- |
 -- >>> minimumOf folded []
 -- Nothing
+
+-- |
+-- >>> maximum [2, 1, 4, 3]
+-- 4
 
 -- |
 -- Find the maximum focus
@@ -2721,10 +3117,6 @@ tvShows = [howIMetYourMother, buffy]
 -- 352
 
 -- |
--- >>> sum $ tvShows ^.. folded . numEpisodes
--- 352
-
--- |
 -- >>> maximumOf (folded . criticScore) tvShows
 -- Just 83.0
 
@@ -2740,6 +3132,14 @@ comparingOf l = comparing (view l)
 -- |
 -- >>> _title <$> maximumByOf folded (comparingOf criticScore) tvShows
 -- Just "How I Met Your Mother"
+
+-- |
+-- >>> tvShows ^.. folded . actors . folded
+-- [Actor {_actorName = "Josh Radnor", _birthYear = 1974},Actor {_actorName = "Cobie Smulders", _birthYear = 1982},Actor {_actorName = "Neil Patrick Harris", _birthYear = 1973},Actor {_actorName = "Alyson Hannigan", _birthYear = 1974},Actor {_actorName = "Jason Segel", _birthYear = 1980},Actor {_actorName = "Sarah Michelle Gellar", _birthYear = 1977},Actor {_actorName = "Alyson Hannigan", _birthYear = 1974},Actor {_actorName = "Nicholas Brendon", _birthYear = 1971},Actor {_actorName = "David Boreanaz", _birthYear = 1969},Actor {_actorName = "Anthony Head", _birthYear = 1954}]
+
+-- |
+-- >>> lengthOf (folded . actors . folded) tvShows
+-- 10
 
 -- |
 -- >>> minimumByOf (folded . actors . folded) (comparingOf birthYear) tvShows
@@ -2766,7 +3166,19 @@ showActor ∷ Actor → String
 showActor actor = _actorName actor <> ": " <> show (calcAge actor)
 
 -- |
--- >>> traverseOf_ (folded . actors . folded . to showActor) putStrLn tvShows
+-- >>> tvShows ^.. folded . actors . folded . to showActor
+-- ["Josh Radnor: 56","Cobie Smulders: 48","Neil Patrick Harris: 57","Alyson Hannigan: 56","Jason Segel: 50","Sarah Michelle Gellar: 53","Alyson Hannigan: 56","Nicholas Brendon: 59","David Boreanaz: 61","Anthony Head: 76"]
+e138 ∷ IO ()
+e138 = traverseOf_ (folded . actors . folded . to showActor) putStrLn tvShows
+
+-- has the form: a → m ()
+-- >>> :type putStrLn
+--              a    → m  ()
+--              |      |
+-- putStrLn ∷ String → IO ()
+
+-- |
+-- >>> e138
 -- Josh Radnor: 56
 -- Cobie Smulders: 48
 -- Neil Patrick Harris: 57
@@ -2778,17 +3190,50 @@ showActor actor = _actorName actor <> ": " <> show (calcAge actor)
 -- David Boreanaz: 61
 -- Anthony Head: 76
 
--- |
+-- has the form: a → m ()
+-- >>> :type modify
+--                              a    → m ()
+--                              |      |
+-- modify ∷ MonadState s m ⇒ (s → s) → m ()
+
 -- Oftentimes it's handy to build up a stateful computation from the focuses of a fold.
--- >>> import Control.Monad.State
--- >>> execState (traverseOf_ folded (modify . const (+ 1)) tvShows) 0
+e139 ∷ Integer
+-- e139 = execState (traverseOf_ folded (modify . const (+ 1)) tvShows) 0
+-- e139 = traverseOf_ folded (\ tvShow → modify (+ 1)) tvShows ∷ StateT Integer Identity ()
+-- e139 = traverseOf_ folded (\ _ → modify (+ 1)) tvShows ∷ StateT Integer Identity ()
+-- e139 = traverseOf_ folded (const $ modify (+ 1)) tvShows ∷ StateT Integer Identity ()
+e139 = execState (traverseOf_ folded (modify . const (+ 1)) tvShows) 0
+
+-- >>> :type const 1
+-- const 1 ∷ b → Integer
+
+-- >>> :type const (+ 1)
+-- const (+ 1) ∷ b → Integer → Integer
+
+-- basically:
+-- const (+ 1) ∷ b → Integer → Integer
+-- `b` applied to TVShow
+-- const (+ 1) ∷ TVShow → Integer → Integer
+-- give it a TVShow and you get a function that is expected by `modify`:
+-- const (+ 1) tvShow ∷ Integer → Integer
+
+-- |
+-- >>> e139
+-- 2
+
+-- the same (only argument order changed)
+e140 ∷ Integer
+e140 = execState (forOf_ folded tvShows (modify . const (+ 1))) 0
+
+-- |
+-- >>> e140
 -- 2
 
 ----------------------------
 -- Combining Fold Results --
 ----------------------------
 
--- foldOf ∷ Monoid a ⇒ Fold s a → s → a
+-- foldOf    ∷ Monoid a ⇒ Fold s a           → s → a
 -- foldMapOf ∷ Monoid r ⇒ Fold s a → (a → r) → s → r
 
 -- |
@@ -2826,7 +3271,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- 57.2
 
 ---------------------------
--- Using ‘view’ on Folds --
+-- Using `view` on Folds --
 ---------------------------
 
 -- A very common mistake when people get started with folds is to use `view` (^.) on a Fold instead of a Lens.
@@ -2838,28 +3283,40 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 
 -- In general you should avoid this "weird" behaviour and just use `foldOf` explicitly when you want this behaviour!!!
 
--- |
 -- This works just fine.
--- >>> Just "do it" ^. folded
+e141 ∷ String
+e141 = Just "do it" ^. folded
+
+-- |
+-- >>> e141
 -- "do it"
 
 -- This one crashes and burns!
--- >>> Just (42 ∷ Int) ^. folded
--- No instance for (Monoid Int) arising from a use of ‘folded’
+-- Compiler Error: No instance for (Monoid Int) arising from a use of ‘folded’
+-- e142 = Just (42 ∷ Int) ^. folded
+
+-- When there's a single focus, we just return it.
+e142 ∷ String
+e142 = Just "do it" ^. folded
 
 -- |
--- When there's a single focus, we just return it.
--- >>> Just "do it" ^. folded
+-- >>> e142
 -- "do it"
 
--- |
 -- When there aren't any focuses, return 'mempty'
--- >>> Nothing ^. folded ∷ String
--- ""
+e143 ∷ String
+e143 = (Nothing ∷ Maybe String) ^. folded
 
 -- |
+-- >>> e143
+-- ""
+
 -- When there are multiple focuses, combine them with (<>).
--- >>> ("one", "two", "three") ^. each
+e144 ∷ String
+e144 = ("one", "two", "three") ^. each
+
+-- |
+-- >>> e144
 -- "onetwothree"
 
 --------------------------------
@@ -2869,27 +3326,35 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- Lots of mapping folds to choose from.
 -- `foldByOf`, `foldMapByOf`, `foldrOf`, `foldlOf`, ...
 
--- |
--- >>> foldMapOf (folded . actors . folded . actorName) (\name → M.singleton name 1) tvShows
--- fromList [("Alyson Hannigan",1),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
+-- e145
+e145 ∷ Map String Integer
+e145 = foldMapOf (folded . actors . folded . actorName) (`M.singleton` 1) tvShows
 
 -- |
--- >>> foldMapOf (folded . actors . folded . actorName) (flip M.singleton 1) tvShows
+-- >>> e145
 -- fromList [("Alyson Hannigan",1),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
 
 -- |
 -- When we combine two maps with the same keys it simply ignores duplicate values.
--- >>> M.singleton 'a' "first" <> M.singleton 'a' "second"
--- fromList [('a',"first")]
+-- >>> M.singleton "an actor" 1 <> M.singleton "an actor" 2
+-- fromList [("an actor",1)]
 
 -- |
 -- This looks better:
--- >>> M.unionWith (+) (M.singleton "an actor" 1) (M.singleton "an actor" 1)
--- fromList [("an actor",2)]
+e146 ∷ Map String Integer
+e146 = M.unionWith (+) (M.singleton "an actor" 1) (M.singleton "an actor" 2)
+
+-- |
+-- >>> e146
+-- fromList [("an actor",3)]
 
 -- |
 -- "Alyson Hannigan" is in both shows.
--- >>> foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (flip M.singleton 1) tvShows
+e147 ∷ Map String Integer
+e147 = foldMapByOf (folded . actors . folded . actorName) (M.unionWith (+)) mempty (`M.singleton` 1) tvShows
+
+-- |
+-- >>> e147
 -- fromList [("Alyson Hannigan",2),("Anthony Head",1),("Cobie Smulders",1),("David Boreanaz",1),("Jason Segel",1),("Josh Radnor",1),("Neil Patrick Harris",1),("Nicholas Brendon",1),("Sarah Michelle Gellar",1)]
 
 ------------------------------
@@ -2916,25 +3381,25 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 
 -- 1. Pick the matching action from the list for each example:
 
--- >>> _ folded []
+-- >>> has folded []
 -- False
 
--- >>> _ both ("Yo", "Adrian!")
+-- >>> foldOf both ("Yo", "Adrian!")
 -- "YoAdrian!"
 
--- >>> _ each "phone" ("E.T.", "phone", "home")
+-- >>> elemOf each "phone" ("E.T.", "phone", "home")
 -- True
 
--- >>> _ folded [5, 7, 2, 3, 13, 17, 11]
+-- >>> minimumOf folded [5, 7, 2, 3, 13, 17, 11]
 -- Just 2
 
--- >>> _ folded [5, 7, 2, 3, 13, 17, 11]
+-- >>> lastOf folded [5, 7, 2, 3, 13, 17, 11]
 -- Just 11
 
--- >>> _ folded ((> 9) . length) ["Bulbasaur", "Charmander", "Squirtle"]
+-- >>> anyOf folded ((> 9) . length) ["Bulbasaur", "Charmander", "Squirtle"]
 -- True
 
--- >>> _ folded even [11, 22, 3, 5, 6]
+-- >>> findOf folded even [11, 22, 3, 5, 6]
 -- Just 22
 
 -- Solutions:
@@ -3023,9 +3488,9 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> foldByOf folded (flip (<>)) "" ["a", "b", "c"]
 -- "cba"
 
-------------------------
--- Higher Order Folds --
-------------------------
+----------------------------
+-- 6.4 Higher Order Folds --
+----------------------------
 
 -- These sorts of combinators are higher-order, because usually they accept an optic as an argument and return a new one as a result.
 
@@ -3039,45 +3504,44 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 
 -- e.g.  `(taking 3)` accepts a Fold which focuses the first three focuses.
 
+-- e148
+e148 ∷ [Integer]
+e148 = [1, 2, 3, 4] ^.. taking 2 folded
+
 -- |
--- >>> [1, 2, 3, 4] ^.. taking 2 folded
+-- >>> e148
 -- [1,2]
 
--- |
--- >>> [1, 2, 3, 4] ^.. dropping 2 folded
--- [3,4]
+-- e149
+e149 ∷ [Integer]
+e149 = [1, 2, 3, 4] ^.. dropping 2 folded
 
 -- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . taking 2 folded
+-- >>> e149
+-- [3,4]
+
+-- e150
+e150 ∷ [Integer]
+e150 = [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . taking 2 folded
+
+-- | Using `to`
+-- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . to (take 2) . folded
 -- [1,2,10,20,100,200]
 
 -- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. taking 2 folded
--- [[1,2,3],[10,20,30]]
-
--- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded
--- [[1,2,3],[10,20,30],[100,200,300]]
+-- >>> e150
+-- [1,2,10,20,100,200]
 
 -- |
 -- >>> ("Albus", "Dumbledore") ^.. both . taking 3 folded
 -- "AlbDum"
 
--- |
--- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. folded . folded
--- [1,2,3,10,20,30,100,200,300]
+-- >>> ("Albus", "Dumbledore") ^.. both . to (take 3) . folded
+-- "AlbDum"
 
 -- |
 -- >>> [[1, 2, 3], [10, 20, 30], [100, 200, 300]] ^.. taking 2 (folded . folded)
 -- [1,2]
-
--- |
--- >>> ("Albus", "Dumbledore") ^.. folded
--- ["Dumbledore"]
-
--- |
--- >>> ("Albus", "Dumbledore") ^.. both
--- ["Albus","Dumbledore"]
 
 -- |
 -- >>> ("Albus", "Dumbledore") ^.. taking 3 both
@@ -3138,17 +3602,21 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- Another higher-order Fold.
 -- backwards ∷ Fold s a → Fold s a
 
+-- e151
+e151 ∷ [Integer]
+e151 = [1, 2, 3] ^.. backwards folded
+
 -- |
--- >>> [1, 2, 3] ^.. backwards folded
+-- >>> e151
 -- [3,2,1]
 
--- |
--- >>> ("one", "two") ^.. backwards both
--- ["two","one"]
+-- e152
+e152 ∷ [String]
+e152 = ("one", "two") ^.. backwards both
 
 -- |
--- >>> [(1, 2), (3, 4)] ^.. folded
--- [(1,2),(3,4)]
+-- >>> e152
+-- ["two","one"]
 
 -- |
 -- >>> [(1, 2), (3, 4)] ^.. folded . both
@@ -3174,8 +3642,12 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- takingWhile   ∷ (a → Bool) → Fold s a → Fold s a
 -- droppingWhile ∷ (a → Bool) → Fold s a → Fold s a
 
+-- e153
+e153 ∷ [Integer]
+e153 = [1, 5, 15, 5, 1] ^.. takingWhile (< 10) folded
+
 -- |
--- >>> [1, 5, 15, 5, 1] ^.. takingWhile (< 10) folded
+-- >>> e153
 -- [1,5]
 
 -- |
@@ -3186,8 +3658,12 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> [1..] ^.. takingWhile (< 10) folded
 -- [1,2,3,4,5,6,7,8,9]
 
+-- e154
+e154 ∷ [Integer]
+e154 = [1 .. 100] ^.. droppingWhile (< 90) folded
+
 -- |
--- >>> [1..100] ^.. droppingWhile (< 90) folded
+-- >>> e154
 -- [90,91,92,93,94,95,96,97,98,99,100]
 
 -- |
@@ -3231,6 +3707,8 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 
 -- Solutions:
 
+-- 1. Fill in the blank. You'll need to remember some tricks from previous sections!
+
 -- |
 -- >>> "Here's looking at you, kid" ^.. dropping 7 folded
 -- "looking at you, kid"
@@ -3264,8 +3742,7 @@ computeAverage (Sum count, Sum total) = fromIntegral total / fromIntegral count
 -- >>> ("stressed", "guns", "evil") ^.. backwards each . to reverse
 -- ["live","snug","desserts"]
 
--- |
--- >>> "blink182 k9 blazeit420" ^.. to (filter isNumber) . folded
+-- >>> "blink182 k9 blazeit420" ^.. folded . filtered isNumber
 -- "1829420"
 
 -- |
@@ -3310,10 +3787,6 @@ sample = [-10, -5, 4, 3, 8, 6, -2, 3, -5, -7]
 -- How many days of below-freezing weather did we have consecutively at the END of the sample?
 
 -- |
--- >>> length $ sample ^.. takingWhile (< 0) (backwards folded)
--- 2
-
--- |
 -- >>> lengthOf (takingWhile (< 0) (backwards folded)) sample
 -- 2
 
@@ -3338,13 +3811,16 @@ sample = [-10, -5, 4, 3, 8, 6, -2, 3, -5, -7]
 trimmingWhile ∷ (a → Bool) → Fold s a → Fold s a
 trimmingWhile predicate = backwards . droppingWhile predicate . backwards . droppingWhile predicate
 
----------------------
--- Filtering Folds --
----------------------
+-------------------------
+-- 6.5 Filtering Folds --
+-------------------------
 
 --------------
 -- Filtered --
 --------------
+
+-- `filtered` doesn't change the type of the elements as they pass through, it simply drops elements from the fold if they don't match the predicate.
+-- The power comes from using `filtered` in the midst of other folds!!!
 
 -- Its type.
 -- filtered ∷ (s → Bool) → Fold s s
@@ -3354,11 +3830,8 @@ trimmingWhile predicate = backwards . droppingWhile predicate . backwards . drop
 -- [2,4]
 
 -- |
--- >>> ["apple", "passionfruit", "orange", "pomegranate"] ^.. folded . filtered ((> 6) . length)
+-- >>> ["apple", "passionfruit", "orange", "pomegranate"] ^.. folded . filtered (length >>> (> 6))
 -- ["passionfruit","pomegranate"]
-
--- The power comes from using `filtered` in the midst of other folds!!!
-
 data Card where
   Card ::
     { _cardName ∷ String,
@@ -3410,27 +3883,32 @@ deck =
 -- 5
 
 -- |
--- >>> lengthOf (folded . moves ) deck
--- 10
+-- >>> lengthOf (folded . moves . folded) deck
+-- 12
 
 -- |
 -- >>> deck ^.. folded . moves . folded . movePower
 -- [20,20,20,10,30,50,40,3,30,40,40,50]
 
--- |
+-- We can even use other fold queries INSIDE our filter!
+-- This lets us filter elements based on a query over the currently focused piece of state!
+-- List all cards which have ANY move with an attack power greater than 40.
+e155 ∷ [String]
+e155 = deck ^.. folded . filtered (anyOf (moves . folded . movePower) (> 40)) . cardName
 
---- List all cards which have ANY move with an attack power greater than 40.
--- >>> deck ^.. folded . filtered (anyOf (moves . folded . movePower) (> 40)) . cardName
+-- |
+-- >>> e155
 -- ["Elecdude","Sparkeon"]
 
 -- |
--- How many moves do my Spark cards have in total?
--- >>> lengthOf (folded . filtered ((== Spark) . _aura) . moves . folded ) deck
+-- We can filter based on certain properties and then continue diving deeper into a different portion of the data.
+-- How many moves do Spark cards have in total?
+-- >>> lengthOf (folded . filtered ( _aura >>> (== Spark)) . moves . folded ) deck
 -- 5
 
 -- |
--- List all my Spark Moves with a power greater than 30.
--- >>> deck ^.. folded . filtered ((== Spark) . _aura) . moves . folded . filtered ((> 30) . _movePower) . moveName
+-- List all Spark Moves with a power greater than 30.
+-- >>> deck ^.. folded . filtered ( _aura >>> (== Spark)) . moves . folded . filtered ( _movePower >>> (> 30)) . moveName
 -- ["Asplode","Shock","Battery"]
 
 -- |
@@ -3461,6 +3939,15 @@ deck =
 -- |
 -- Get the holographic card which has the largest number of moves
 -- >>> maximumByOf (folded . filtered _holo) (comparing (lengthOf moves)) deck
+-- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
+
+-- |
+-- >>> deck ^.. (folded . filteredBy (holo . only True))
+-- [Card {_cardName = "Garydose", _aura = Wet, _holo = True, _moves = [Move {_moveName = "Gary's move", _movePower = 40}]},Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]}]
+
+-- |
+-- more idiomatic; staying in the optics world
+-- >>> maximumByOf (folded . filteredBy (holo . only True)) (comparing (lengthOf moves)) deck
 -- Just (Card {_cardName = "Sparkeon", _aura = Spark, _holo = True, _moves = [Move {_moveName = "Shock", _movePower = 40},Move {_moveName = "Battery", _movePower = 50}]})
 
 ---------------------------
@@ -3495,13 +3982,17 @@ deck =
 -- "Kapichu"
 
 -- |
+-- >>> firstOf (folded . filtered ((> 1) . length . _moves) . cardName) deck
+-- Just "Kapichu"
+
+-- |
 -- Are there any Hot cards with a move with more than 30 attack power?
--- >>> anyOf (folded . (filtered ((== Hot) . _aura)) . moves . folded . movePower) (> 30) deck
+-- >>> anyOf (folded . filteredBy (aura . only Hot) . moves . folded . movePower) (> 30) deck
 -- True
 
 -- |
 -- Are there any Hot cards with a move with more than 40 attack power?
--- >>> anyOf (folded . (filtered ((== Hot) . _aura)) . moves . folded . movePower) (> 40) deck
+-- >>> anyOf (folded . filteredBy (aura . only Hot) . moves . folded . movePower) (> 40) deck
 -- False
 
 -- |
@@ -3514,27 +4005,27 @@ deck =
 -- >>> sumOf (folded . filtered ((/= Leafy) . _aura) . moves . folded . movePower) deck
 -- 303
 
----------------
--- Fold Laws --
----------------
+-------------------
+-- 6.6 Fold Laws --
+-------------------
 
 -- There aren't any!
 
 --------------------------------------------------------------------------------------------
---                                       Traversals                                       --
+--                                    7. Traversals                                       --
 --------------------------------------------------------------------------------------------
 
---------------------------------
--- Introduction to Traversals --
---------------------------------
+------------------------------------
+-- 7.1 Introduction to Traversals --
+------------------------------------
 
 -- Traversals are essentially what you get if you combine all the powers of folds and lenses together.
 -- Lenses can get and set only a single value, whereas folds can get multiple values, but can't set or update.
 -- Traversals are the fusion of the two and allow us to get or set zero or more values.
 
------------------------------------------------
--- How do Traversals Fit into the Hierarchy? --
------------------------------------------------
+------------------------------------------------
+-- How do Traversals Fit into the Hierarchy ? --
+------------------------------------------------
 
 --            |  Get   | Set/Modify | Traverse
 -----------------------------------------------
@@ -3542,9 +4033,9 @@ deck =
 -- Fold       |  Many  |     ✗      |   ✗
 -- Traversal  |  Many  |   Many     | Many
 
--- A Traversal can be used as a Fold but not vice versa.
--- A Fold can only be used as a Fold.
 -- A Lens can be used as anything.
+-- A Fold can only be used as a Fold.
+-- A Traversal can be used as a Fold but not vice versa.
 --
 -- can be used as | Lens | Fold | Traversal
 -- -------------- | -----| -----| ----------
@@ -3571,63 +4062,98 @@ deck =
 -- >>> ("Bubbles", "Buttercup") ^.. both
 -- ["Bubbles","Buttercup"]
 
--- |
 -- Modify the focuses using the `over` action: (%∼).
--- >>> ("Bubbles", "Buttercup") & both %~ (++ "!")
+e156 ∷ (String, String)
+e156 = ("Bubbles", "Buttercup") & both %~ (++ "!")
+
+-- |
+-- >>> e156
 -- ("Bubbles!","Buttercup!")
 
--- |
 -- Using `set` (.∼) on a Traversal.
--- >>> ("Bubbles", "Buttercup") & both .~ "Blossom"
+e157 ∷ (String, String)
+e157 = ("Bubbles", "Buttercup") & both .~ "Blossom"
+
+-- |
+-- >>> e157
 -- ("Blossom","Blossom")
 
--- |
 -- Changing type of tuple (polymorphic Traversal).
--- >>> ("Bubbles", "Buttercup") & both %~ length
+e158 ∷ (Int, Int)
+e158 = ("Bubbles", "Buttercup") & both %~ length
+
+-- |
+-- >>> e158
 -- (7,9)
 
--- |
 -- `each` is also a Traversal.
--- >>> (1, 2, 3) & each %~ (* 10)
+e159 ∷ (Integer, Integer, Integer)
+e159 = (1, 2, 3) & each %~ (* 10)
+
+-- |
+-- >>> e159
 -- (10,20,30)
 
+-- e160
+e160 ∷ String
+e160 = "Here's Johnny" & each %~ toUpper
+
 -- |
--- ("Here's Johnny" ∷ Text) & each %~ toUpper
+-- >>> e160
 -- "HERE'S JOHNNY"
 
--- |
--- You can't change what Text is made of.
--- A Text block must be made up of Chars, we can't just change them to Ints and expect it to work.
--- ("Houston we have a problem" ∷ Text) & each .~ (22 ∷ Int)
--- Couldn't match expected type ‘Text’ with actual type ‘[Char]’
--- Couldn't match type ‘Int’ with ‘Char’ arising from a use of ‘each’
+-- e161
+e161 ∷ [Int]
+e161 = "Houston we have a problem" & each .~ (22 ∷ Int)
 
 -- |
--- >>> [1, 2, 3, 4, 5] & taking 3 traversed *~ 10
+-- >>> e161
+-- [22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22,22]
+
+-- e162
+e162 ∷ [Integer]
+e162 = [1, 2, 3, 4, 5] & taking 3 traversed *~ 10
+
+-- |
+-- >>> e162
 -- [10,20,30,4,5]
 
+-- e163
+e163 ∷ [Integer]
+e163 = [1, 2, 3, 4, 5] & dropping 3 traversed *~ 10
+
 -- |
--- >>> [1, 2, 3, 4, 5] & dropping 3 traversed *~ 10
+-- >>> e163
 -- [1,2,3,40,50]
 
+-- e164
+e164 ∷ String
+e164 = "once upon a time - optics became mainstream" & takingWhile (/= '-') traversed %~ toUpper
+
 -- |
--- >>> "once upon a time - optics became mainstream" & takingWhile (/= '-') traversed %~ toUpper
+-- >>> e164
 -- "ONCE UPON A TIME - optics became mainstream"
 
--- |
 -- Multiply all even numbers by 10.
--- >>> [1, 2, 3, 4, 5] & traversed . filtered even *~ 10
+e165 ∷ [Integer]
+e165 = [1, 2, 3, 4, 5] & traversed . filtered even *~ 10
+
+-- |
+-- >>> e165
 -- [1,20,3,40,5]
 
--- |
 -- `filtered` is an extremely powerful tool, it alters the exact same elements which would be focused when you use it in a fold.
 -- Reverse only the long strings.
--- >>> ("short", "really long") & both . filtered ((> 5) . length) %~ reverse
+e166 ∷ (String, String)
+e166 = ("short", "really long") & both . filtered ((> 5) . length) %~ reverse
+
+-- |
+-- >>> e166
 -- ("short","gnol yllaer")
 
----------------------------
--- Traversal Combinators --
----------------------------
+-------------------------------
+-- 7.2 Traversal Combinators --
+-------------------------------
 
 --------------------------------------------
 -- Traversing Each Element of a Container --
@@ -3643,18 +4169,30 @@ deck =
 
 -- |
 -- Lists are traversable.
+-- >>> [1, 2, 3] ^.. traversed
+-- [1,2,3]
+
+-- |
+-- Lists are traversable.
 -- >>> [1, 2, 3] & traversed *~ 10
 -- [10,20,30]
 
--- |
--- Tuples are traversable (over their last slot).
--- >>> ("Batman", "Superman") & traversed %~ take 3
--- ("Batman","Sup")
+-- Tuples are traversable (over their LAST slot).
+e167 ∷ (String, String)
+e167 = ("Batman", "Superman") & traversed %~ take 3
 
 -- |
+-- >>> e167
+-- ("Batman","Sup")
+
 -- Maps are traversable.
--- >>> let powerLevels = M.fromList [("Gohan", 710) , ("Goku", 9001) , ("Krillin", 5000) , ("Piccolo", 408)]
--- >>> powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
+e168 ∷ Map String String
+e168 =
+  let powerLevels = M.fromList [("Gohan", 710), ("Goku", 9001), ("Krillin", 5000), ("Piccolo", 408)]
+   in powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
+
+-- |
+-- >>> e168
 -- fromList [("Gohan","710"),("Goku","Over 9000"),("Krillin","5000"),("Piccolo","408")]
 
 -- |
@@ -3663,47 +4201,71 @@ deck =
 -- powerLevels & traversed %~ \n → if n > 9000 then "Over 9000" else show n
 -- No instance for (Traversable Set) arising from a use of ‘traversed’
 
--- |
 -- Trees are traversable.
--- >>> let opticsTree = Node "Lens" [Node "Fold" [], Node "Traversal" []]
--- >>> opticsTree & traversed %~ reverse
+e169 ∷ Tree String
+e169 =
+  let opticsTree = Node "Lens" [Node "Fold" [], Node "Traversal" []]
+   in opticsTree & traversed %~ reverse
+
+-- |
+-- >>> e169
 -- Node {rootLabel = "sneL", subForest = [Node {rootLabel = "dloF", subForest = []},Node {rootLabel = "lasrevarT", subForest = []}]}
 
 ----------------------
 -- More Combinators --
 ----------------------
 
--- |
 -- As Folds `worded` works pretty much the same as `words` from the Prelude.
--- >>> "I'll be back!" ^.. worded
+e170 ∷ [String]
+e170 = "I'll be back!" ^.. worded
+
+-- |
+-- >>> e170
 -- ["I'll","be","back!"]
 
--- |
 -- The same for `lined`.
--- >>> "Run\nForrest\nRun" ^.. lined
+e171 ∷ [String]
+e171 = "Run\nForrest\nRun" ^.. lined
+
+-- |
+-- >>> e171
 -- ["Run","Forrest","Run"]
 
--- |
 -- As Traversal we can also update.
 -- Surround each word with '*'s.
--- Result is a String.
--- >>> "blue suede shoes" & worded %~ \s → "*" ++ s ++ "*"
+e172 ∷ String
+e172 = "blue suede shoes" & worded %~ \s → "*" ++ s ++ "*"
+
+-- |
+-- >>> e172
 -- "*blue* *suede* *shoes*"
 
--- |
 -- Capitalize each word.
--- >>> "blue suede shoes" & worded %~ \(x:xs) → toUpper x : xs
+e173 ∷ String
+e173 = "blue suede shoes" & worded %~ \(x : xs) → toUpper x : xs
+
+-- |
+-- >>> e173
 -- "Blue Suede Shoes"
 
--- |
 -- Add a "#" to the start of each line.
--- >>> "blue\nsuede\nshoes" & lined %~ ('#':)
--- "#blue\n#suede\n#shoes"
+e174 ∷ String
+e174 = "blue\nsuede\nshoes" & lined %~ ('#' :)
 
 -- |
--- Mapping the identity function still has the white-space collapsing side-effects of `unwords`.
--- Newlines are getting lost.
--- >>> "blue \n suede \n \n shoes" & worded %~ id
+-- >>> e174
+-- "#blue\n#suede\n#shoes"
+
+-- Mapping the identity function still has the white-space collapsing side-effects of `unwords`. Newlines are getting lost.
+-- Makes worded and lined unlawful but still useful.
+e175 ∷ String
+e175 = "blue \n suede \n \n shoes" & worded %~ id
+
+-- >>> "blue \n suede \n \n shoes" ^.. worded
+-- ["blue","suede","shoes"]
+
+-- |
+-- >>> e175
 -- "blue suede shoes"
 
 ---------------------------------------
@@ -3719,35 +4281,59 @@ deck =
 -- `beside` is a higher-order optic.
 -- It takes two Optics as arguments and returns a new Optic as a result.
 
--- |
 -- Note: `id` is a valid Optic.
--- >>> let dinos = ("T-Rex", (42, "Stegosaurus"))
--- >>> dinos ^.. beside id _2
+e176 ∷ [String]
+e176 =
+  let dinos = ("T-Rex", (42, "Stegosaurus"))
+   in dinos ^.. beside id _2
+
+-- |
+-- >>> e176
 -- ["T-Rex","Stegosaurus"]
 
--- |
 -- We can provide a different path to focus Ints for each half of the tuple.
--- >>> let numbers = ([(1, 2), (3, 4)], [5, 6, 7])
--- >>> numbers ^.. beside (traversed . both) traversed
+e177 ∷ [Integer]
+e177 =
+  let numbers = ([(1, 2), (3, 4)], [5, 6, 7])
+   in numbers ^.. beside (traversed . both) traversed
+
+-- |
+-- >>> e177
 -- [1,2,3,4,5,6,7]
 
+-- e178
+e178 ∷ [String]
+e178 = ("T-Rex", ("Ankylosaurus", "Stegosaurus")) ^.. beside id both
+
 -- |
--- >>> ("T-Rex", ("Ankylosaurus", "Stegosaurus")) ^.. beside id both
+-- >>> e178
 -- ["T-Rex","Ankylosaurus","Stegosaurus"]
 
--- |
 -- We can modify all characters inside both halves of the tuple.
 -- Each half of the tuple has a different path to focus the characters.
--- >>> ("Cowabunga", ["let's", "order", "pizza"]) & beside traversed (traversed . traversed) %~ toUpper
+e179 ∷ (String, [String])
+e179 = ("Cowabunga", ["let's", "order", "pizza"]) & beside traversed (traversed . traversed) %~ toUpper
+
+-- |
+-- >>> e179
 -- ("COWABUNGA",["LET'S","ORDER","PIZZA"])
 
--- |
 -- Every `Bitraversable` - not only tuples - can be used with `beside`!!!
--- >>> Left (1, 2) & beside both traversed %~ negate
--- Left (-1,-2)
+e180 ∷ Either (Int, Int) [Int]
+e180 = Left (1, 2) & beside both traversed %~ negate
 
 -- |
--- >>> Right [3, 4] & beside both traversed %~ negate ∷ Either (Int, Int) [Int]
+-- >>> e180
+-- Left (-1,-2)
+--
+-- Left (-1,-2)
+
+-- e181
+e181 ∷ Either (Int, Int) [Int]
+e181 = Right [3, 4] & beside both traversed %~ negate
+
+-- |
+-- >>> e181
 -- Right [-3,-4]
 
 -------------------------------------------
@@ -3758,53 +4344,79 @@ deck =
 -- Because it doesn't focus every element of the container it's a Monomorphic Traversal.
 -- element ∷ Traversable f ⇒ Int → Traversal' (f a) a
 
--- |
--- >>> [0, 1, 2, 3, 4] ^? element 2
--- Just 2
+-- e182
+e182 ∷ Maybe Integer
+e182 = [0, 1, 2, 3, 4] ^? element 2
 
 -- |
+-- >>> e182
+-- Just 2
+
 -- `element` can't change the container's element type.
--- It is a `Monomorphic Traversal` after all.
--- >>> [0, 1, 2, 3, 4] & element 2 *~ 100
+-- It is a `Monomorphic Traversal`.
+e183 ∷ [Integer]
+e183 = [0, 1, 2, 3, 4] & element 2 *~ 100
+
+-- |
+-- >>> e183
 -- [0,1,200,3,4]
 
 -- `elementOf` is a higher-order traversal which allows to select a specific element from an arbitrary traversal.
 -- elementOf ∷ Traversal' s a → Int → Traversal' s a
 -- elementOf ∷ Fold s a       → Int → Fold s a
 
--- |
 -- `element` is basically `elementOf traversed`
--- >>> [0, 1, 2, 3, 4] ^? elementOf traversed 2
+e184 ∷ Maybe Integer
+e184 = [0, 1, 2, 3, 4] ^? elementOf traversed 2
+
+-- |
+-- >>> e184
 -- Just 2
 
--- |
 -- We can get a specific element from a composition of traversals.
--- >>> [[0, 1, 2], [3, 4], [5, 6, 7, 8]] ^? elementOf (traversed . traversed) 6
+e185 ∷ Maybe Integer
+e185 = [[0, 1, 2], [3, 4], [5, 6, 7, 8]] ^? elementOf (traversed . traversed) 6
+
+-- |
+-- >>> e185
 -- Just 6
 
+-- e186
+e186 ∷ [[Integer]]
+e186 = [[0, 1, 2], [3, 4], [5, 6, 7, 8]] & elementOf (traversed . traversed) 6 *~ 100
+
 -- |
--- >>> [[0, 1, 2], [3, 4], [5, 6, 7, 8]] & elementOf (traversed . traversed) 6 *~ 100
+-- >>> e186
 -- [[0,1,2],[3,4],[5,600,7,8]]
 
----------------------------
--- Traversal Composition --
----------------------------
+-------------------------------
+-- 7.3 Traversal Composition --
+-------------------------------
 
 -- Each traversal selects focuses, then rebuilds the structure around the transformed results!!!
 
--- |
 -- Capitalize the first char of every word.
--- >>> "blue suede shoes" & worded . taking 1 traversed %~ toUpper
+e187 ∷ String
+e187 = "blue suede shoes" & worded . taking 1 traversed %~ toUpper
+
+-- |
+-- >>> e187
 -- "Blue Suede Shoes"
 
--- |
 -- Find all strings longer than 5 chars then surround each word in that string with '*'.
--- >>> ["short", "really long"] & traversed . filtered ((> 5) . length) . worded %~ \s → "*" ++ s ++ "*"
--- ["short","*really* *long*"]
+e188 ∷ [String]
+e188 = ["short", "really long"] & traversed . filtered ((> 5) . length) . worded %~ \s → "*" ++ s ++ "*"
 
 -- |
+-- >>> e188
+-- ["short","*really* *long*"]
+
 -- Add "Richy " to the names of people with more than $1000.
--- >>> (("Ritchie", 100000), ("Archie", 32), ("Reggie", 4350)) & each . filtered ((> 1000) . snd) . _1 %~ ("Richy " ++)
+e189 ∷ ((String, Integer), (String, Integer), (String, Integer))
+e189 = (("Ritchie", 100000), ("Archie", 32), ("Reggie", 4350)) & each . filtered ((> 1000) . snd) . _1 %~ ("Richy " ++)
+
+-- |
+-- >>> e189
 -- (("Richy Ritchie",100000),("Archie",32),("Richy Reggie",4350))
 
 -----------------------------------
@@ -3885,7 +4497,7 @@ deck =
 -- ((2,3),(4,5))
 
 -- |
--- >>> (1, (2, [3, 4])) & beside id (beside id traverse) +~ 1
+-- >>> (1, (2, [3, 4])) & beside id (beside id traversed) +~ 1
 -- (2,(3,[4,5]))
 
 -- |
@@ -3893,12 +4505,16 @@ deck =
 -- ((True,"STRAWberries"),(False,"Blueberries"),(True,"BLACKberries"))
 
 -- |
+-- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & each . filtered fst . _2 . taking 5 traversed %~ toUpper
+-- ((True,"STRAWberries"),(False,"Blueberries"),(True,"BLACKberries"))
+
+-- |
 -- >>> ((True, "Strawberries"), (False, "Blueberries"), (True, "Blackberries")) & each %~ snd
 -- ("Strawberries","Blueberries","Blackberries")
 
------------------------
--- Traversal Actions --
------------------------
+---------------------------
+-- 7.4 Traversal Actions --
+---------------------------
 
 -----------------------------
 -- A Primer on Traversable --
@@ -3913,18 +4529,37 @@ deck =
 -- [IO a] → IO [a]
 -- Map k (State s a) → State s (Map k a)
 
+-- e190
+e190 ∷ Maybe [Integer]
+e190 = sequenceA [Just 1, Just 2, Just 3]
+
 -- |
--- >>> sequenceA [Just 1, Just 2, Just 3]
+-- >>> e190
 -- Just [1,2,3]
 
--- |
--- >>> sequenceA [Just 1, Nothing, Just 3]
--- Nothing
+-- e191
+e191 ∷ Maybe [Integer]
+e191 = sequenceA [Just 1, Nothing, Just 3]
 
 -- |
+-- >>> e191
+-- Nothing
+
 -- sequenceA ∷ Maybe (Either String a) → Either String (Maybe a)
--- >>> sequenceA $ Just (Left "Whoops")
+e192 ∷ Either String (Maybe a)
+e192 = sequenceA $ Just (Left "Whoops")
+
+-- |
+-- >>> e192
 -- Left "Whoops"
+
+-- sequenceA ∷ Maybe (Either String a) → Either String (Maybe a)
+e193 ∷ Either a (Maybe String)
+e193 = sequenceA $ Just (Right "Whoops")
+
+-- |
+-- >>> e193
+-- Right (Just "Whoops")
 
 -- :t readMaybe
 -- readMaybe ∷ Read a ⇒ String → Maybe a
@@ -3938,45 +4573,67 @@ deck =
 -- The Traversable is '[ ]', and the effect is 'Maybe'
 -- (String → Maybe Int) → [String] → Maybe [Int]
 
--- |
 -- readMaybe ∷ Read a ⇒ String → Maybe a
--- >>> import Text.Read (readMaybe)
--- >>> traverse readMaybe ["1", "2", "3"] ∷ Maybe [Int]
--- Just [1,2,3]
+e194 ∷ Maybe [Int]
+e194 = traverse readMaybe ["1", "2", "3"]
 
 -- |
--- >>> import Text.Read (readMaybe)
--- >>> traverse readMaybe ["1", "snark", "3"] ∷ Maybe [Int]
+-- >>> e194
+-- Just [1,2,3]
+
+-- e195
+e195 ∷ Maybe [Int]
+e195 = traverse readMaybe ["1", "snark", "3"]
+
+-- |
+-- >>> e195
 -- Nothing
 
 -- The Traversable is '((,) String)', and the effect is '[ ]'
 -- (Int → [Int]) → (String, Int) → [(String, Int)]
 
+-- e196
+e196 ∷ [(String, Integer)]
+e196 = traverse (\n → [n * 10, n * 100]) ("a", 10)
+
 -- |
--- traverse ∷ (Integer → [Integer]) → ([Char], Integer) → [([Char], Integer)]
--- >>> traverse (\n → [n * 10, n * 100]) ("a", 10)
+-- >>> e196
 -- [("a",100),("a",1000)]
 
 ----------------------------
 -- Traverse on Traversals --
 ----------------------------
 
+-- e197
+e197 ∷ Maybe (Int, Int)
+e197 = traverseOf both readMaybe ("1", "2")
+
 -- |
--- >>> import Text.Read (readMaybe)
--- >>> traverseOf both readMaybe ("1", "2") ∷ Maybe (Int, Int)
+-- >>> e197
 -- Just (1,2)
 
+-- e198
+e198 ∷ Maybe (Int, Int)
+e198 = traverseOf both readMaybe ("not a number", "2")
+
 -- |
--- >>> import Text.Read (readMaybe)
--- >>> traverseOf both readMaybe ("not a number", "2") ∷ Maybe (Int, Int)
+-- >>> e198
 -- Nothing
 
--- |
--- >>> traverseOf both (\c → [toLower c, toUpper c]) ('a', 'b')
--- [('a','b'),('a','B'),('A','b'),('A','B')]
+-- e199
+e199 ∷ [(Char, Char)]
+e199 = traverseOf both (\c → [toLower c, toUpper c]) ('a', 'b')
 
 -- |
--- >>> traverseOf (both . traversed) (\c → [toLower c, toUpper c]) ("ab", "cd")
+-- >>> e199
+-- [('a','b'),('a','B'),('A','b'),('A','B')]
+
+-- e200
+e200 ∷ [(String, String)]
+e200 = traverseOf (both . traversed) (\c → [toLower c, toUpper c]) ("ab", "cd")
+
+-- |
+-- >>> e200
 -- [("ab","cd"),("ab","cD"),("ab","Cd"),("ab","CD"),("aB","cd"),("aB","cD"),("aB","Cd"),("aB","CD"),("Ab","cd"),("Ab","cD"),("Ab","Cd"),("Ab","CD"),("AB","cd"),("AB","cD"),("AB","Cd"),("AB","CD")]
 
 -- simple validation
@@ -3985,12 +4642,20 @@ validateEmail email
   | '@' `elem` email = Right email
   | otherwise = Left ("missing '@': " <> email)
 
--- |
--- >>> traverseOf (traversed . _2) validateEmail [ ("Mike", "mike@tmnt.io") , ("Raph", "raph@tmnt.io") , ("Don", "don@tmnt.io") , ("Leo", "leo@tmnt.io") ]
--- Right [("Mike","mike@tmnt.io"),("Raph","raph@tmnt.io"),("Don","don@tmnt.io"),("Leo","leo@tmnt.io")]
+-- e201
+e201 ∷ Either String [(String, String)]
+e201 = traverseOf (traversed . _2) validateEmail [("Mike", "mike@tmnt.io"), ("Raph", "raph@tmnt.io"), ("Don", "don@tmnt.io"), ("Leo", "leo@tmnt.io")]
 
 -- |
--- >>> traverseOf (traversed . _2) validateEmail [ ("Mike", "mike@tmnt.io") , ("Raph", "raph.io") , ("Don", "don@tmnt.io") , ("Leo", "leo@tmnt.io") ]
+-- >>> e201
+-- Right [("Mike","mike@tmnt.io"),("Raph","raph@tmnt.io"),("Don","don@tmnt.io"),("Leo","leo@tmnt.io")]
+
+-- e202
+e202 ∷ Either String [(String, String)]
+e202 = traverseOf (traversed . _2) validateEmail [("Mike", "mike@tmnt.io"), ("Raph", "raph.io"), ("Don", "don@tmnt.io"), ("Leo", "leo@tmnt.io")]
+
+-- |
+-- >>> e202
 -- Left "missing '@': raph.io"
 
 -- We want to collect all the errors.
@@ -3999,12 +4664,20 @@ validateEmail' email
   | '@' `elem` email = Success email
   | otherwise = Failure ["missing '@': " <> email]
 
--- |
--- >>> traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph@tmnt.io"], ["don@tmnt.io", "leo@tmnt.io"])
--- Success (["mike@tmnt.io","raph@tmnt.io"],["don@tmnt.io","leo@tmnt.io"])
+-- e203
+e203 ∷ Validation [String] ([String], [String])
+e203 = traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph@tmnt.io"], ["don@tmnt.io", "leo@tmnt.io"])
 
 -- |
--- >>> traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph.io"], ["don@tmnt.io", "leo.io"])
+-- >>> e203
+-- Success (["mike@tmnt.io","raph@tmnt.io"],["don@tmnt.io","leo@tmnt.io"])
+
+-- e204
+e204 ∷ Validation [String] ([String], [String])
+e204 = traverseOf (both . traversed) validateEmail' (["mike@tmnt.io", "raph.io"], ["don@tmnt.io", "leo.io"])
+
+-- |
+-- >>> e204
 -- Failure ["missing '@': raph.io","missing '@': leo.io"]
 
 -- `forOf` is the arguments-flipped version of `traverseOf`.
@@ -4013,36 +4686,56 @@ validateEmail' email
 -- We can use `sequenceAOf` to pull effects deep inside our structures to the outside.
 -- sequenceAOf ∷ Traversal s t (f a) a → s → f t
 
--- |
 -- Pull out `Just`.
--- >>> sequenceAOf _1 (Just "Garfield", "Lasagna")
+e205 ∷ Maybe (String, String)
+e205 = sequenceAOf _1 (Just "Garfield", "Lasagna")
+
+-- |
+-- >>> e205
 -- Just ("Garfield","Lasagna")
 
+-- e206
+e206 ∷ Maybe (a, String)
+e206 = sequenceAOf _1 (Nothing, "Lasagna")
+
 -- |
--- >>> sequenceAOf _1 (Nothing, "Lasagna")
+-- >>> e206
 -- Nothing
 
--- |
 -- Pull out `Just`.
--- >>> sequenceAOf (both . traversed) ([Just "apples"], [Just "oranges"])
--- Just (["apples"],["oranges"])
+e207 ∷ Maybe ([String], [String])
+e207 = sequenceAOf (both . traversed) ([Just "apples"], [Just "oranges"])
 
 -- |
--- >>> sequenceAOf (both . traversed) ([Just "apples"], [Nothing])
+-- >>> e207
+-- Just (["apples"],["oranges"])
+
+-- e208
+e208 ∷ Maybe ([String], [String])
+e208 = sequenceAOf (both . traversed) ([Just "apples"], [Nothing])
+
+-- |
+-- >>> e208
 -- Nothing
 
 -----------------------------
 -- Infix `traverseOf`: %%∼ --
 -----------------------------
 
--- |
--- >>> import Text.Read (readMaybe)
--- >>> (("1", "2") & both %%~ readMaybe) ∷ Maybe (Int, Int)
--- Just (1,2)
+-- e209
+e209 ∷ Maybe (Int, Int)
+e209 = ("1", "2") & both %%~ readMaybe
 
 -- |
--- >>> import Text.Read (readMaybe)
--- >>> (("not a number", "2") & both %%~ readMaybe) ∷ Maybe (Int, Int)
+-- >>> e209
+-- Just (1,2)
+
+-- e210
+e210 ∷ Maybe (Int, Int)
+e210 = ("not a number", "2") & both %%~ readMaybe
+
+-- |
+-- >>> e210
 -- Nothing
 
 -------------------------------
@@ -4051,10 +4744,12 @@ validateEmail' email
 
 -- Instead of using `traverseOf` or `%%∼,` we can often just use the traversal itself!
 
--- |
 -- Here we use `both` directly as though it were `traverse`:
--- >>> import Text.Read (readMaybe)
--- >>> both readMaybe ("1", "2") ∷ Maybe (Int, Int)
+e211 ∷ Maybe (Int, Int)
+e211 = both readMaybe ("1", "2")
+
+-- |
+-- >>> e211
 -- Just (1,2)
 
 -- I'd recommend avoiding this style; it's unnecessarily confusing, unidiomatic, and doesn't translate well to other optics libraries, but it's sometimes useful to know that it exists.
@@ -4110,25 +4805,57 @@ validateEmail' email
 --    error message if it fails validation.
 
 data AUser where
-  AUser ∷ {_aname ∷ String, _age ∷ Int} → AUser
+  AUser ::
+    { _aname ∷ String,
+      _age ∷ Int
+    } ->
+    AUser
   deriving (Show)
 
 makeLenses ''AUser
 
 data Account where
-  Account ∷ {_accId ∷ String, _user ∷ AUser} → Account
+  Account ::
+    { _accId ∷ String,
+      _user ∷ AUser
+    } ->
+    Account
   deriving (Show)
 
 makeLenses ''Account
 
+--  ProdId  →   Maybe        Prod
+--    |           ▼           |
+--    |        traverse       |
+--    |           ▼           |
+-- [ProdId] →   Maybe       [Prod]
+
+--   Int   → Either String   Int
+--    |           ▼           |
+--    |      traverseOf       |
+--    |           ▼           |
+-- Account → Either String Account
+
 validateAge ∷ Account → Either String Account
 validateAge = traverseOf (user . age) check
   where
+    check ∷ Int → Either String Int
     check accAge
       | accAge < 0 = Left "Way too young!"
       | accAge > 150 = Left "Way too old!"
       | otherwise = Right accAge
 
+-- using Maybe
+-- validateAge ∷ Account → Maybe Account
+-- validateAge = traverseOf (user . age) check
+--   where
+--     check ∷ Int → Maybe Int
+--     check accAge
+--       | accAge < 0 = Nothing
+--       | accAge > 150 = Nothing
+--       | otherwise = Just accAge
+
+-- without traverseOf
 -- validateAge ∷ Account → Either String Account
 -- validateAge account
 --   | accAge < 0 = Left "Way too young!"
@@ -4153,6 +4880,8 @@ validateAge = traverseOf (user . age) check
 -- Every optic is actually the exact same type plus or minus constraints on `f`!
 -- As optics are composed, the constraints on `f` are gathered up.
 
+-- Most optics are really just `traverse` wearing different pants.
+
 --------------------------------
 -- Our First Custom Traversal --
 --------------------------------
@@ -4160,24 +4889,24 @@ validateAge = traverseOf (user . age) check
 -- Van Laarhoven optics are just a function which matches a ‘traverse-like’ signature.
 -- We can write our own traversals by hand.
 
--- Simplified version of traversed which works only on lists.
--- Call the `handler` for things you want to focus on!
--- The `handler` focuses elements!
+-- Simplified version of `traversed` which works only on lists. (`s` and `t` are lists.)
 values ∷ Applicative f ⇒ (a → f b) → [a] → f [b]
 values _ [] = pure []
 -- values handler (a : as) = liftA2 (:) (handler a) (values handler as)
 values handler (a : as) = (:) <$> handler a <*> values handler as
 
 -- |
+-- view
 -- >>> ["one", "two", "three"] ^.. values
 -- ["one","two","three"]
 
 -- |
+-- modify
 -- >>> ["one", "two", "three"] & values %~ reverse
 -- ["eno","owt","eerht"]
 
 -- |
--- type-changing transformation
+-- modify (changing type)
 -- >>> ["one", "two", "three"] & values %~ length
 -- [3,3,5]
 
@@ -4209,17 +4938,25 @@ newtype BankAccount = BankAccount
 
 makeLenses ''BankAccount
 
--- |
 -- Get all transactions.
--- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
--- >>> aliceAccount ^.. transactions . traversed
--- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Withdrawal {_moneyAmount = 10}]
+e212 ∷ [Transaction]
+e212 =
+  let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
+   in aliceAccount ^.. transactions . traversed
 
 -- |
+-- >>> e212
+-- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Withdrawal {_moneyAmount = 10}]
+
 -- Get the amounts for all transactions.
 -- `moneyAmount` targets both Withdrawals and Deposits.
--- >>> let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
--- >>> aliceAccount ^.. transactions . traversed . moneyAmount
+e213 ∷ [Int]
+e213 =
+  let aliceAccount = BankAccount [Deposit 100, Withdrawal 20, Withdrawal 10]
+   in aliceAccount ^.. transactions . traversed . moneyAmount
+
+-- |
+-- >>> e213
 -- [100,20,10]
 
 ---------------------------------------
@@ -4231,55 +4968,86 @@ makeLenses ''BankAccount
 -- deposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction] -- Expand into the 'traverse'-like function.
 
 -- The handler is for determining the focus.
--- Call the handler means focus on this value.
+-- Calling the handler means focus on this value.
 -- Not calling the handler means do not focus on this value.
 deposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction]
 deposits _ [] = pure []
 deposits handler (Withdrawal amt : rest) = (Withdrawal amt :) <$> deposits handler rest
 deposits handler (Deposit amt : rest) = liftA2 (:) (Deposit <$> handler amt) (deposits handler rest)
 
--- |
 -- Get all the Deposit transaction amounts:
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits
+e214 ∷ [Int]
+e214 = [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits
+
+-- |
+-- >>> e214
 -- [10,30]
 
--- |
 -- Multiply the amounts of all Deposits by 10
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits *~ 10
+e215 ∷ [Transaction]
+e215 = [Deposit 10, Withdrawal 20, Deposit 30] & deposits *~ 10
+
+-- |
+-- >>> e215
 -- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
-
--- WARNING: When focusing a subset of a list like this our first thought is often to look at using a helper like `filter t`o implement the Traversal.
--- But you need to be careful! `filter` is a destructive operation, it throws away any parts of the list which don't match.
-
 isDeposit ∷ Transaction → Bool
 isDeposit (Deposit _) = True
 isDeposit _ = False
 
+-- WARNING: When focusing a subset of a list like this our first thought is often to look at using a helper like `filter` to implement the Traversal.
+-- But you need to be careful! `filter` is a destructive operation, it throws away any parts of the list which don't match.
+
+-- this is what the language server found out
+-- badDeposits ∷ Applicative f ⇒ (Int → f Int) → [Transaction] → f [Transaction]
 badDeposits ∷ Traversal' [Transaction] Int
 badDeposits handler ts = traverse go (filter isDeposit ts)
   where
+    -- go ∷ Transaction → f Transaction
     go (Deposit amt) = Deposit <$> handler amt
     go (Withdrawal _) = error "This shouldn't happen"
 
+-- e216
+e216 ∷ [Int]
+e216 = [Deposit 10, Withdrawal 20, Deposit 30] ^.. badDeposits
+
 -- |
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. badDeposits
+-- >>> e216
 -- [10,30]
 
+-- The `Withdrawal` is lost when using `set`.
+e217 ∷ [Transaction]
+e217 = [Deposit 10, Withdrawal 20, Deposit 30] & badDeposits *~ 10
+
 -- |
--- The `Withdrawal` is lost.
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] & badDeposits *~ 10
+-- >>> e217
 -- [Deposit {_moneyAmount = 100},Deposit {_moneyAmount = 300}]
 
--- Using existing traversals.
+-- Using existing traversals. (This is how you would really do it!)
 deposits' ∷ Traversal' [Transaction] Int
 deposits' = traversed . filtered isDeposit . moneyAmount
 
--- |
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits'
--- [10,30]
+-- e218
+e218 ∷ [Transaction]
+e218 = [Deposit 10, Withdrawal 20, Deposit 30] ^.. traversed . filtered isDeposit
 
 -- |
--- >>> [Deposit 10, Withdrawal 20, Deposit 30] & deposits' *~ 10
+-- >>> e218
+-- [Deposit {_moneyAmount = 10},Deposit {_moneyAmount = 30}]
+
+-- e219
+e219 ∷ [Int]
+e219 = [Deposit 10, Withdrawal 20, Deposit 30] ^.. deposits'
+
+-- |
+-- >>> e219
+-- [10,30]
+
+-- e220
+e220 ∷ [Transaction]
+e220 = [Deposit 10, Withdrawal 20, Deposit 30] & deposits' *~ 10
+
+-- |
+-- >>> e220
 -- [Deposit {_moneyAmount = 100},Withdrawal {_moneyAmount = 20},Deposit {_moneyAmount = 300}]
 
 -----------------------------------
@@ -4293,6 +5061,11 @@ amountT ∷ Applicative f ⇒ (Int → f Int) → Transaction → f Transaction
 amountT handler (Withdrawal amt) = Withdrawal <$> handler amt
 amountT handler (Deposit amt) = Deposit <$> handler amt
 
+-- from dump of makeLenses
+amountT' ∷ Lens' Transaction Int
+amountT' f (Withdrawal amt) = Withdrawal <$> f amt
+amountT' f (Deposit amt) = Deposit <$> f amt
+
 -- 2. Reimplement the `both traversal` over tuples:
 
 -- both ∷ Traversal (a, a) (b, b) a b
@@ -4305,6 +5078,11 @@ both' handler (a1, a2) = (,) <$> handler a1 <*> handler a2
 transactionDelta ∷ Functor f ⇒ (Int → f Int) → Transaction → f Transaction
 transactionDelta handler (Withdrawal amt) = Withdrawal . negate <$> handler (negate amt)
 transactionDelta handler (Deposit amt) = Deposit <$> handler amt
+
+-- Applicative is a Functor
+-- >>> :info Applicative
+-- type Applicative ∷ (* → *) → Constraint
+-- class Functor f ⇒ Applicative f where
 
 -- It should focus the amount of the transaction, but should reflect the change that the transaction
 -- causes to the balance of the account. That is, Deposits should be a positive number, but Withdrawals
@@ -4375,16 +5153,19 @@ beside' left right handler (s, s') = (,) <$> (s & left %%~ handler) <*> (s' & ri
 badTupleSnd ∷ Traversal (Int, a) (Int, b) a b
 badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 
--- The idea is that traversals shouldn't be messing around where they don't belong.
--- Let the handlers do the updating and don't mess with state yourself!
-
 -- |
+-- we are in an IO context
 -- >>> traverseOf badTupleSnd pure (10, "Yo")
 -- (11,"Yo")
 
 -- |
 -- >>> pure (10, "Yo")
 -- (10,"Yo")
+
+-- |
+-- just using Maybe as Applicative
+-- >>> traverseOf badTupleSnd pure (10, "Yo") == (pure (10, "Yo") ∷ Maybe (Int, String))
+-- False
 
 ---------------------------------
 -- Law Two: Consistent Focuses --
@@ -4409,7 +5190,6 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- 3
 
 -- |
--- `filtered` is a law-breaking traversal.
 -- >>> 2 & filtered even %~ (* 10) . (+ 1)
 -- 30
 
@@ -4430,18 +5210,51 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 
 -- Passes 1st law.
 
--- |
--- >>> traverseOf worded pure "Hello again my friend"
--- "Hello again my friend"
+-- using Maybe as Applicative
+e221 ∷ Maybe String
+e221 = traverseOf worded pure "Hello again my friend"
 
 -- |
--- >>> pure "Hello again my friend"
--- "Hello again my friend"
+-- >>> e221
+-- Just "Hello again my friend"
+
+-- |
+-- >>> pure "Hello again my friend" ∷ Maybe String
+-- Just "Hello again my friend"
+
+-- e222
+e222 ∷ Bool
+e222 = traverseOf worded pure "Hello again my friend" == (pure "Hello again my friend" ∷ Maybe String)
+
+-- |
+-- >>> e222
+-- True
 
 -- |
 -- Adding a space to the string during an update creates new focuses for the worded traversal!
 -- >>> ("one two" & worded %~ (<> " missisipi") & worded %~ reverse) == ("one two" & worded %~ reverse . (<> " missisipi"))
 -- False
+
+-- |
+--                        space causing trouble
+--                                |
+-- >>> "one two" & worded %~ (<> " missisipi") & worded %~ reverse
+-- "eno ipisissim owt ipisissim"
+
+-- |
+--                                  space causing trouble
+--                                          |
+-- >>> "one two" & worded %~ reverse . (<> " missisipi")
+-- "ipisissim eno ipisissim owt"
+
+-- |
+-- removing the space
+-- >>> "one two" & worded %~ (<> "missisipi") & worded %~ reverse
+-- "ipisissimeno ipisissimowt"
+
+-- |
+-- >>> "one two" & worded %~ reverse . (<> "missisipi")
+-- "ipisissimeno ipisissimowt"
 
 -- 2. Write a custom traversal which breaks the first law. Be as creative as you like!
 -- NA
@@ -4458,14 +5271,15 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- lined: ✗ (Adding a newline creates new focuses for the next lined traversal.)
 -- traversed: ✓
 
----------------------------
--- Advanced Manipulation --
----------------------------
+-------------------------------
+-- 7.7 Advanced Manipulation --
+-------------------------------
 
+-- `partsOf` is a higher-order combinator which converts a traversal into a lens over a list of the traversal's focuses:
 -- partsOf ∷ Traversal' s a → Lens' s [a]
 
--- The lens generated by partsOf takes all the focuses of the provided traversal and packs them into a
--- list to be manipulated. Then, it takes the modified list and maps each element back into the original structure!
+-- The lens generated by partsOf takes all the focuses of the provided traversal and packs them into a list to be manipulated.
+-- Then it takes the modified list and maps each element back into the original structure!
 
 -- Rules regarding replacement:
 -- If the list has more elements than the traversal, the extras will be ignored.
@@ -4474,73 +5288,99 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- It's because of these rules that `partsOf` isn't a polymorphic lens.
 -- We might need to re-use some of the original elements so we can't change their type!
 
--- Get
+-- e223
+e223 ∷ String
+e223 = [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _1)
 
 -- |
--- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _1)
+-- >>> e223
 -- "abc"
 
+-- e224
+e224 ∷ [Integer]
+e224 = [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _2)
+
 -- |
--- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _2)
+-- >>> e224
 -- [1,2,3]
 
--- set
+-- We can `set` the lens to a list to replace the corresponding elements
+e225 ∷ [(Char, Integer)]
+e225 = [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['c', 'a', 't']
 
 -- |
--- We can `set` the lens to a list to replace the corresponding elements
--- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['c', 'a', 't']
+-- >>> e225
 -- [('c',1),('a',2),('t',3)]
 
--- |
 -- Any 'extra' list elements are simply ignored
--- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['l', 'e', 'o', 'p', 'a', 'r', 'd']
+e226 ∷ [(Char, Integer)]
+e226 = [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['l', 'e', 'o', 'p', 'a', 'r', 'd']
+
+-- |
+-- >>> e226
 -- [('l',1),('e',2),('o',3)]
 
--- |
 -- Providing too few elements will keep the originals
--- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['x']
+e227 ∷ [(Char, Integer)]
+e227 = [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) .~ ['x']
+
+-- |
+-- >>> e227
 -- [('x',1),('b',2),('c',3)]
 
--- Modify (over)
+-- e228
+e228 ∷ [(Char, Integer)]
+e228 = [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) %~ reverse
 
 -- |
--- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _1) %~ reverse
+-- >>> e228
 -- [('c',1),('b',2),('a',3)]
 
+-- e229
+e229 ∷ [(Char, Integer)]
+e229 = [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ sort
+
 -- |
--- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ sort
+-- >>> e229
 -- [('f',1),('o',2),('o',3)]
 
+-- e230
+e230 ∷ [(Char, Integer)]
+e230 = [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ tail
+
 -- |
--- See if you can follow along with how this one works:
--- >>> [('o', 1), ('o', 2), ('f', 3)] & partsOf (traversed . _1) %~ tail
+-- >>> e230
 -- [('o',1),('f',2),('f',3)]
 
+-- e231
+e231 ∷ (String, String, String)
+e231 = ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . sort . words
+
 -- |
--- >>> ("how is a raven ", "like a ", "writing desk") & partsOf (each . traversed) %~ unwords . sort . words
+-- >>> e231
 -- ("a a desk how is"," like r","aven writing")
 
--- ("how is a raven ", "like a ", "writing desk")
--- 'each' collects each string
--- "how is a raven " "like a " "writing desk"
--- 'traversed' focuses each individual character
--- 'h' 'o' 'w' ' ' 'i' 's' ...
--- The 'partsOf' around (each . traversed) collects the focuses into a list:
+-- >>> ("how is a raven ", "like a ", "writing desk") ^.. each
+-- ["how is a raven ","like a ","writing desk"]
+
+-- >>> ("how is a raven ", "like a ", "writing desk") ^.. each . traversed
 -- "how is a raven like a writing desk"
--- 'words' splits the list into words
+
+-- >>> words "how is a raven like a writing desk"
 -- ["how","is","a","raven","like","a","writing","desk"]
--- 'sort' sorts the words
+
+-- >>> sort ["how","is","a","raven","like","a","writing","desk"]
 -- ["a","a","desk","how","is","like","raven","writing"]
--- unwords flattens back to a String (a.k.a. list of characters)
+
+-- >>> unwords ["a","a","desk","how","is","like","raven","writing"]
 -- "a a desk how is like raven writing"
--- 'partsOf' then maps each character back to a position
--- a a desk how is like r aven writing"
--- Result:
--- ("a a desk how is"," like r","aven writing")
+
+-- Collect 'each' tuple element into a list, then traverse that list
+e232 ∷ [String]
+e232 = ("abc", "def") ^.. partsOf each . traversed
 
 -- |
--- Collect 'each' tuple element into a list, then traverse that list
--- >>> ("abc", "def") ^.. partsOf each . traversed
+-- >>> e232
 -- ["abc","def"]
 
 -- |
@@ -4548,22 +5388,16 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- >>> ("abc", "def") ^.. partsOf (each . traversed)
 -- ["abcdef"]
 
--- |
--- You can use partsOf to edit elements using their neighbours as context.
--- >>> [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _2) %~ \xs → (/ sum xs) <$> xs
--- [('a',0.16666666666666666),('b',0.3333333333333333),('c',0.5)]
+-- replaces each number with its percentage of the sum of ALL numbers in the structure
+e233 ∷ [(Char, Double)]
+e233 = [('a', 1), ('b', 2), ('c', 3)] & partsOf (traversed . _2) %~ \xs → (/ sum xs) <$> xs
 
--- [('a', 1), ('b', 2), ('c', 3)]
--- Focus each number with 'partsOf (traversed . _2)'
--- [1, 2, 3]
--- Substitute into the function:
--- (/ sum [1, 2, 3]) <$> [1, 2, 3]
--- Evaluate
--- [0.16666,0.33333,0.5]
--- partsOf maps back each element into the original structure
--- 0.16666 0.33333 0.5
--- Result:
--- [('a',0.16666), ('b',0.33333), ('c',0.5)]
+-- >>> [('a', 1), ('b', 2), ('c', 3)] ^. partsOf (traversed . _2)
+-- [1,2,3]
+
+-- |
+-- >>> e233
+-- [('a',0.16666666666666666),('b',0.3333333333333333),('c',0.5)]
 
 -------------------------
 -- Polymorphic partsOf --
@@ -4572,17 +5406,43 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- We can change the type of the focus but we if set or modify with the wrong number of list elements it'll crash.
 -- unsafePartsOf ∷ Traversal s t a b → Lens s t [a] [b]
 
--- |
--- [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False]
+-- too few elements
+e234 ∷ [(Bool, Integer)]
+e234 = [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False]
+
+-- >>> e234
 -- unsafePartsOf': not enough elements were supplied
 
--- |
--- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False, True]
--- [(True,1),(False,2),(True,3)]
+-- e235
+e235 ∷ [(Bool, Integer)]
+e235 = [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) .~ [True, False, True]
 
 -- |
--- >>> [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) %~ \xs → zipWith (,) xs ((Just <$> tail xs) ++ [Nothing])
+-- >>> e235
+-- [(True,1),(False,2),(True,3)]
+
+-- e236
+e236 ∷ [((Char, Maybe Char), Integer)]
+e236 = [('a', 1), ('b', 2), ('c', 3)] & unsafePartsOf (traversed . _1) %~ \xs → zipWith (,) xs ((Just <$> tail xs) ++ [Nothing])
+
+-- |
+-- >>> e236
 -- [(('a',Just 'b'),1),(('b',Just 'c'),2),(('c',Nothing),3)]
+
+-----------------------------------------
+-- `partsOf` and Other Data Structures --
+-----------------------------------------
+
+-- Interesting case study from the author.
+
+userIds ∷ Tree UserId
+userIds = undefined
+
+lookupUsers ∷ [UserId] → IO [User]
+lookupUsers = undefined
+
+treeLookup ∷ Tree UserId → IO (Tree User)
+treeLookup = traverseOf (unsafePartsOf traversed) lookupUsers
 
 -------------------------
 -- Exercises - partsOf --
@@ -4642,12 +5502,14 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- (("abc",'a'),("abc",'b'),("abc",'c'))
 
 --------------------------------------------------------------------------------------------
---                               Indexable Structures                                     --
+--                            8. Indexable Structures                                     --
 --------------------------------------------------------------------------------------------
 
-------------------------------------
--- What's an Indexable Structure? --
-------------------------------------
+----------------------------------------
+-- 8.1 What's an Indexable Structure? --
+----------------------------------------
+
+-- Each data structure provides its own separate methods for getting or setting values. Annoying!
 
 -- Lists allow getting values by an Int index.
 
@@ -4675,9 +5537,9 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- >>> M.adjust ("Two " <>) "Leo" (M.fromList [("Leo", "Katanas"), ("Raph", "Sai")])
 -- fromList [("Leo","Two Katanas"),("Raph","Sai")]
 
------------------------------------------------
--- Accessing and Updating Values with 'Ixed' --
------------------------------------------------
+---------------------------------------------------
+-- 8.2 Accessing and Updating Values with 'Ixed' --
+---------------------------------------------------
 
 --------------------
 -- The Ixed Class --
@@ -4686,10 +5548,10 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- class Ixed m where
 --   ix ∷ Index m → Traversal' m (IxValue m)
 
+-- `ix` takes an index for a structure and builds a traversal over the value at that index.
+
 -- Index and IxValue are type families.
 -- They tell us which index type or value type to use for a given structure.
-
--- Type families are functions that operate on types!
 
 -- The index for lists is `Int`:
 -- type instance Index [a] = Int
@@ -4706,44 +5568,68 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- `ix` can neither create nor delete slots in an indexed structure, doing so would actually break the second Traversal law!
 -- Don't worry though, we'll learn a perfectly law abiding way to insert into Maps soon.
 
--- |
 -- Get the value at index 1:
--- >>> ["Borg", "Cardassian", "Talaxian"] ^? ix 1
+e237 ∷ Maybe String
+e237 = ["Borg", "Cardassian", "Talaxian"] ^? ix 1
+
+-- |
+-- >>> e237
 -- Just "Cardassian"
 
--- |
 -- There's no value at index 10 so the traversal doesn't focus anything.
--- >>> ["Borg", "Cardassian", "Talaxian"] ^? ix 10
--- Nothing
+e238 ∷ Maybe String
+e238 = ["Borg", "Cardassian", "Talaxian"] ^? ix 10
 
 -- |
+-- >>> e238
+-- Nothing
+
 -- It's a traversal, so we can `set` new values at that index.
--- >>> ["Borg", "Cardassian", "Talaxian"] & ix 1 .~ "Vulcan"
+e239 ∷ [String]
+e239 = ["Borg", "Cardassian", "Talaxian"] & ix 1 .~ "Vulcan"
+
+-- |
+-- >>> e239
 -- ["Borg","Vulcan","Talaxian"]
 
--- |
 -- A `set` will do nothing if the given index doesn't have a value.
--- >>> ["Borg", "Cardassian", "Talaxian"] & ix 10 .~ "Romulan"
+e240 ∷ [String]
+e240 = ["Borg", "Cardassian", "Talaxian"] & ix 10 .~ "Romulan"
+
+-- |
+-- >>> e240
 -- ["Borg","Cardassian","Talaxian"]
 
--- |
 -- Get the value at key "Zuko".
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^? ix "Zuko"
+e241 ∷ Maybe String
+e241 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^? ix "Zuko"
+
+-- |
+-- >>> e241
 -- Just "Fire"
 
--- |
 -- If there's no value at a key, the traversal returns zero elements.
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^? ix "Sokka"
+e242 ∷ Maybe String
+e242 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^? ix "Sokka"
+
+-- |
+-- >>> e242
 -- Nothing
 
--- |
 -- We can set the value at a key, but only if that key already exists.
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & ix "Toph" .~ "Metal"
--- fromList [("Katara","Water"),("Toph","Metal"),("Zuko","Fire")]
+e243 ∷ Map String String
+e243 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & ix "Toph" .~ "Metal"
 
 -- |
+-- >>> e243
+-- fromList [("Katara","Water"),("Toph","Metal"),("Zuko","Fire")]
+
 -- Setting a non-existent element of a Map does NOT insert it.
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & ix "Iroh" .~ "Lightning"
+e244 ∷ Map String String
+e244 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & ix "Iroh" .~ "Lightning"
+
+-- |
+-- >>> e244
 -- fromList [("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
 
 ------------------------
@@ -4769,36 +5655,58 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 -- Indexing Monomorphic Types --
 --------------------------------
 
+e245 ∷ Maybe Char
+e245 = T.pack "hello" ^? ix 0
+
 -- |
--- ("hello" ∷ Text) ^? ix 0
+-- >>> e245
 -- Just 'h'
+e246 ∷ Maybe Char
+e246 = T.pack "hello" ^? ix 10
 
 -- |
--- ("hello" ∷ Text) ^? ix 10
+-- >>> e246
 -- Nothing
+e247 ∷ Text
+e247 = T.pack "hello" & ix 0 .~ 'j'
 
 -- |
--- ("hello" ∷ Text) & ix 0 .~ 'j'
+-- >>> e247
 -- "jello"
+packStr ∷ String → B.ByteString
+packStr = encodeUtf8 . T.pack
+
+-- Word8's are shown as integers
+e248 ∷ Maybe Word8
+e248 = packStr "hello" ^? ix 0
 
 -- |
--- Word8's are shown as integers
--- ("hello" ∷ ByteString) ^? ix 0
+-- >>> e248
 -- Just 104
 
+-- e249
+e249 ∷ Maybe Word8
+e249 = packStr "hello" ^? ix 10
+
 -- |
--- ("hello" ∷ ByteString) ^? ix 10
+-- >>> e249
 -- Nothing
 
--- |
 -- We can edit a Word8 within a ByteString as though it's an integer.
--- ("hello" ∷ ByteString) & ix 0 +~ 2
--- "jello"
+e250 ∷ ByteString
+e250 = packStr "hello" & ix 0 +~ 2
 
 -- |
--- Remember, we can always 'traverse' a traversal using effectful handlers!
--- ("hello" ∷ Text) & ix 1 %%~ \_ → ("aeiou" ∷ [Char])
--- [ "hallo" , "hello" , "hillo" , "hollo" , "hullo" ]
+-- >>> e250
+-- "jello"
+
+-- We can always 'traverse' a traversal using effectful handlers!
+e251 ∷ [Text]
+e251 = T.pack "hello" & ix 1 %%~ const "aeiou"
+
+-- |
+-- >>> e251
+-- ["hallo","hello","hillo","hollo","hullo"]
 
 ----------------------------------
 -- Indexing Stranger Structures --
@@ -4813,57 +5721,88 @@ badTupleSnd handler (n, a) = (n + 1,) <$> handler a
 tree ∷ Tree Int
 tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
 
--- |
 -- The empty list represents the value at the root.
--- 0 goes left, 1 goes right, empty goes nowhere.
--- >>> tree ^? ix []
+-- 0 → left, 1 → right, empty → stay
+e252 ∷ Maybe Int
+e252 = tree ^? ix []
+
+-- |
+-- >>> e252
 -- Just 1
 
--- |
 -- 0 represents the first child of the root.
--- >>> tree ^? ix [0]
+e253 ∷ Maybe Int
+e253 = tree ^? ix [0]
+
+-- |
+-- >>> e253
 -- Just 2
 
--- |
 -- 0, 0 descends into the first child twice then focuses the value at that node.
--- >>> tree ^? ix [0, 0]
+e254 ∷ Maybe Int
+e254 = tree ^? ix [0, 0]
+
+-- |
+-- >>> e254
 -- Just 4
 
+-- e255
+e255 ∷ Maybe Int
+e255 = tree ^? ix [1, 0]
+
 -- |
--- >>> tree ^? ix [1, 0]
+-- >>> e255
 -- Just 5
 
+-- e256
+e256 ∷ Maybe Int
+e256 = tree ^? ix [1, 1]
+
 -- |
--- >>> tree ^? ix [1, 1]
+-- >>> e256
 -- Just 6
 
--- |
 -- Invalid paths simply return an empty traversal.
--- >>> tree ^? ix [5, 6]
+e257 ∷ Maybe Int
+e257 = tree ^? ix [5, 6]
+
+-- |
+-- >>> e257
 -- Nothing
 
--- |
 -- Indexing into a function runs the function with the index as input
--- >>> reverse ^? ix "Stella!"
--- Just "!alletS"
+e258 ∷ Maybe String
+e258 = reverse ^? ix "Stella!"
 
 -- |
+-- >>> e258
+-- Just "!alletS"
+
 -- Invalid paths simply return an empty traversal.
 -- We can set or traverse individual results of a function!
 -- Here we overwrite the function's output at the input value "password" so it instead returns a new value.
--- >>> let specialReverse = reverse & ix "password" .~ "You found the secret!"
--- >>> specialReverse "password"
--- "You found the secret!"
+
+specialReverse ∷ String → String
+specialReverse = reverse & ix "password" .~ "You found the secret!"
+
+e259 ∷ String
+e259 = specialReverse "password"
 
 -- |
+-- >>> e259
+-- "You found the secret!"
+
 -- The function is unaffected at all other inputs
--- >>> let specialReverse = reverse & ix "password" .~ "You found the secret!"
--- >>> specialReverse "dunno"
+e260 ∷ String
+e260 = specialReverse "dunno"
+
+-- |
+-- >>> e260
 -- "onnud"
 
-------------------------------------
--- Inserting & Deleting with `At` --
-------------------------------------
+----------------------------------------
+-- 8.3 Inserting & Deleting with `at` --
+----------------------------------------
 
 -------------------------
 -- Map-like Structures --
@@ -4876,46 +5815,83 @@ tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
 --   at ∷ Index m → Lens' m (Maybe (IxValue m))
 
 -- For comparison, here's `ix` and `at` side-by-side:
--- ix ∷ Index m → Traversal' m (IxValue m)
+-- ix ∷ Index m → Traversal' m        (IxValue m)
 -- at ∷ Index m → Lens'      m (Maybe (IxValue m))
 
--- |
--- >>> M.insert "Mikey" "Nunchaku" $ M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
--- fromList [("Leo","Katanas"),("Mikey","Nunchaku"),("Raph","Sai")]
+-- To insert or replace an element we can set a value wrapped in Just; to delete we can set the focus to Nothing.
+
+-- e261
+e261 ∷ Map String String
+e261 = M.insert "Mikey" "Nunchaku" $ M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
 
 -- |
--- >>> M.delete "Leo" $ M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+-- >>> e261
+-- fromList [("Leo","Katanas"),("Mikey","Nunchaku"),("Raph","Sai")]
+e262 ∷ Map String String
+e262 = M.delete "Leo" $ M.fromList [("Leo", "Katanas"), ("Raph", "Sai")]
+
+-- |
+-- >>> e262
 -- fromList [("Raph","Sai")]
 
--- To insert or replace an element we can set a value wrapped in Just; to delete we can set the focus to Nothing.
 -- We can update a value arbitrarily using `over` and providing a function from `Maybe a → Maybe a`.
 
--- |
 -- Since 'at' creates a lens, we use `^.` instead of `^?`
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^. at "Zuko"
+e263 ∷ Maybe String
+e263 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] ^. at "Zuko"
+
+-- |
+-- >>> e263
 -- Just "Fire"
 
+-- to delete an element we can set the focus to Nothing
+e264 ∷ Map String String
+e264 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Zuko" .~ Nothing
+
 -- |
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Zuko" .~ Nothing
+-- >>> e264
 -- fromList [("Katara","Water"),("Toph","Earth")]
 
--- |
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Iroh" .~ Just "Lightning"
--- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+-- to insert/replace an element we can set a value wrapped in Just
+e265 ∷ Map String String
+e265 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Iroh" .~ Just "Lightning"
 
 -- |
+-- >>> e265
+-- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+
+-- ?~ is for inserting/updating elements
 -- Using the `?~` operator we can avoid writing out the Just when inserting elements.
--- >>> M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Iroh" ?~ "Lightning"
--- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+e266 ∷ Map String String
+e266 = M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")] & at "Iroh" ?~ "Lightning"
 
 -- |
--- We can use this with other optics if we want, but it's usually used with `at`.
--- >>> (1, 2) & both ?~ "twins!"
+-- >>> e266
+-- fromList [("Iroh","Lightning"),("Katara","Water"),("Toph","Earth"),("Zuko","Fire")]
+
+-- We can use `?~` with other optics if we want, but it's usually used with `at`.
+e267 ∷ (Maybe String, Maybe String)
+e267 = (1, 2) & both .~ Just "twins!"
+
+-- |
+-- >>> e267
 -- (Just "twins!",Just "twins!")
 
+-- We can use `?~` with other optics if we want, but it's usually used with `at`.
+e268 ∷ (Maybe String, Maybe String)
+e268 = (1, 2) & both ?~ "twins!"
+
 -- |
+-- >>> e268
+-- (Just "twins!",Just "twins!")
+
+-- `sans` deletes elements
 -- `sans` is just short-hand for setting the value at an index to `Nothing`.
--- >>> sans "Katara" $ M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+e269 ∷ Map String String
+e269 = sans "Katara" $ M.fromList [("Katara", "Water"), ("Toph", "Earth"), ("Zuko", "Fire")]
+
+-- |
+-- >>> e269
 -- fromList [("Toph","Earth"),("Zuko","Fire")]
 
 -----------------------
@@ -4929,27 +5905,44 @@ tree = Node 1 [Node 2 [Node 4 []], Node 3 [Node 5 [], Node 6 []]]
 primes ∷ Set Int
 primes = S.fromList [2, 3, 5, 7, 11, 13]
 
+-- e270
+e270 ∷ Maybe ()
+e270 = primes ^? ix 5
+
 -- |
--- >>> primes ^? ix 5
+-- >>> e270
 -- Just ()
 
+-- e271
+e271 ∷ Maybe ()
+e271 = primes ^? ix 4
+
 -- |
--- >>> primes ^? ix 4
+-- >>> e271
 -- Nothing
 
--- |
 -- Insert 17 into the Set.
--- >>> primes & at 17 ?~ ()
+e272 ∷ Set Int
+e272 = primes & at 17 ?~ ()
+
+-- |
+-- >>> e272
 -- fromList [2,3,5,7,11,13,17]
 
--- |
 -- Remove 4 from the Set.
--- >>> sans 5 primes
--- fromList [2,3,7,11,13]
+e273 ∷ Set Int
+e273 = sans 5 primes
 
 -- |
+-- >>> e273
+-- fromList [2,3,7,11,13]
+
 -- We can use `&` to chain uses of `sans`.
--- >>> primes & sans 5 & sans 7 & sans 11
+e274 ∷ Set Int
+e274 = primes & sans 5 & sans 7 & sans 11
+
+-- |
+-- >>> e274
 -- fromList [2,3,13]
 
 --------------------------------------
@@ -4988,9 +5981,9 @@ primes = S.fromList [2, 3, 5, 7, 11, 13]
 -- >>> M.fromList [("candy bars", 13), ("soda", 34), ("gum", 7)] & sans "gum" & ix "soda" +~ 3 & at "ice cream" ?~ 5
 -- fromList [("candy bars",13),("ice cream",5),("soda",37)]
 
-------------------------------------
--- Custom Indexed Data Structures --
-------------------------------------
+----------------------------------------
+-- 8.4 Custom Indexed Data Structures --
+----------------------------------------
 
 ------------------------------------
 -- Custom Ixed: Cyclical Indexing --
@@ -5003,6 +5996,22 @@ type instance Index (Cycled a) = Int
 
 type instance IxValue (Cycled a) = a
 
+-- there is a default implementation in terms of `at`
+-- >>> :info ix
+-- type Ixed ∷ * → Constraint
+-- class Ixed m where
+--   ix ∷ Index m → Traversal' m (IxValue m)
+--   default ix ∷ At m ⇒ Index m → Traversal' m (IxValue m)
+
+-- >>> :info Traversal'
+-- type Traversal' ∷ * → * → *
+-- type Traversal' s a = Traversal s s a a
+
+-- >>> :info Traversal
+-- type Traversal ∷ * → * → * → * → *
+-- type Traversal s t a b =
+--   ∀ (f ∷ * → *). Applicative f ⇒ (a → f b) → s → f t
+
 instance Ixed (Cycled a) where
   -- ix ∷ Index m → Traversal' m (IxValue m)
   -- ix ∷ Index (Cycled a) → Traversal' (Cycled a) (IxValue (Cycled a))
@@ -5010,37 +6019,68 @@ instance Ixed (Cycled a) where
   ix ∷ Applicative f ⇒ Int → (a → f a) → Cycled a → f (Cycled a)
   ix i handler (Cycled xs) = Cycled <$> traverseOf (ix (i `mod` length xs)) handler xs
 
--- |
--- >>> Cycled ['a', 'b', 'c'] ^? ix 1
--- Just 'b'
+-- e275
+e275 ∷ Maybe Char
+e275 = Cycled ['a', 'b', 'c'] ^? ix 1
 
 -- |
--- >>> Cycled ['a', 'b', 'c'] ^? ix 3
+-- >>> e275
+-- Just 'b'
+
+-- e276
+e276 ∷ Maybe Char
+e276 = Cycled ['a', 'b', 'c'] ^? ix 3
+
+-- |
+-- >>> e276
 -- Just 'a'
 
+-- e277
+e277 ∷ Maybe Char
+e277 = Cycled ['a', 'b', 'c'] ^? ix 10
+
 -- |
--- >>> Cycled ['a', 'b', 'c'] ^? ix 10
+-- >>> e277
 -- Just 'b'
 
+-- e278
+e278 ∷ Maybe Char
+e278 = Cycled ['a', 'b', 'c'] ^? ix (-1)
+
 -- |
--- >>> Cycled ['a', 'b', 'c'] ^? ix (-1)
+-- >>> e278
 -- Just 'c'
 
+-- e279
+e279 ∷ Cycled Char
+e279 = Cycled ['a', 'b', 'c'] & ix 0 .~ '!'
+
 -- |
--- >>> Cycled ['a', 'b', 'c'] & ix 0 .~ '!'
+-- >>> e279
 -- Cycled "!bc"
 
--- |
--- >>> Cycled ['a', 'b', 'c'] & ix 10 .~ '!'
--- Cycled "a!c"
+-- e280
+e280 ∷ Cycled Char
+e280 = Cycled ['a', 'b', 'c'] & ix 10 .~ '!'
 
 -- |
--- >>> Cycled ['a', 'b', 'c'] & ix (-1) .~ '!'
+-- >>> e280
+-- Cycled "a!c"
+
+-- e281
+e281 ∷ Cycled Char
+e281 = Cycled ['a', 'b', 'c'] & ix (-1) .~ '!'
+
+-- |
+-- >>> e281
 -- Cycled "ab!"
 
 ---------------------------------
 -- Custom At: Address Indexing --
 ---------------------------------
+
+-- The data type doesn't need to be a traditional "container type".
+-- So long as we can implement the typeclass it'll all work!
 
 data PostalAddress where
   PostalAddress ::
@@ -5066,8 +6106,21 @@ type instance Index PostalAddress = AddressPiece
 type instance IxValue PostalAddress = String
 
 -- We need the instance declaration for Ixed, but can leave the implementation blank.
--- It will be implemented automatically in terms of `At`
+-- It will be implemented automatically in terms of `at`.
+
+-- >>> :info ix
+-- type Ixed ∷ * → Constraint
+-- class Ixed m where
+--   ix ∷ Index m → Traversal' m (IxValue m)
+--   default ix ∷ At m ⇒ Index m → Traversal' m (IxValue m)
+
 instance Ixed PostalAddress
+
+-- >>> :info at
+-- type At ∷ * → Constraint
+-- class Ixed m ⇒ At m where
+--   at ∷ Index m → Lens' m (Maybe (IxValue m))
+--   	-- Defined in ‘Control.Lens.At’
 
 instance At PostalAddress where
   -- at ∷ Index m → Lens' m (Maybe (IxValue m))
@@ -5079,43 +6132,96 @@ instance At PostalAddress where
   at ApartmentNumber = apartmentNumber
   at PostalCode = postalCode
 
+-- e282
+e282 ∷ PostalAddress
+e282 = PostalAddress Nothing Nothing Nothing Nothing
+
 -- |
--- >>> PostalAddress Nothing Nothing Nothing Nothing
+-- >>> e282
 -- PostalAddress {_buildingNumber = Nothing, _streetsName = Nothing, _apartmentNumber = Nothing, _postalCode = Nothing}
 
+-- e283
+e283 ∷ PostalAddress
+e283 = PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B"
+
 -- |
--- >>> PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B"
+-- >>> e283
 -- PostalAddress {_buildingNumber = Nothing, _streetsName = Just "Baker St.", _apartmentNumber = Just "221B", _postalCode = Nothing}
 
--- |
--- >>> PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B" & ix ApartmentNumber .~ "221A"
--- PostalAddress {_buildingNumber = Nothing, _streetsName = Just "Baker St.", _apartmentNumber = Just "221A", _postalCode = Nothing}
+-- e284
+e284 ∷ PostalAddress
+e284 = PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B" & ix ApartmentNumber .~ "221A"
 
 -- |
--- >>> PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B" & sans StreetName
+-- >>> e284
+-- PostalAddress {_buildingNumber = Nothing, _streetsName = Just "Baker St.", _apartmentNumber = Just "221A", _postalCode = Nothing}
+
+-- e285
+e285 ∷ PostalAddress
+e285 = PostalAddress Nothing Nothing Nothing Nothing & at StreetName ?~ "Baker St." & at ApartmentNumber ?~ "221B" & sans StreetName
+
+-- |
+-- >>> e285
 -- PostalAddress {_buildingNumber = Nothing, _streetsName = Nothing, _apartmentNumber = Just "221B", _postalCode = Nothing}
 
 -------------------------------------------
 -- Exercises – Custom Indexed Structures --
 -------------------------------------------
 
--- TODO
 -- 1. Implement both Ixed and At for a newtype wrapper around a Map which makes indexing case insensitive, you can specialize to String or Text keys.
 --    Write the ix instance manually even though it has a default implementation.
 --    It's okay to assume that user will only interact with the map via Ixed and At.
 
------------------------------
--- Handling Missing Values --
------------------------------
+newtype CaseInsensitive value = CaseInsensitive {_unCaseSensitive ∷ M.Map String value} deriving (Show)
+
+makeLenses ''CaseInsensitive
+
+type instance Index (CaseInsensitive value) = String
+
+type instance IxValue (CaseInsensitive value) = value
+
+strToLower ∷ String → String
+strToLower = map toLower
+
+-- >>> :info Traversal
+-- type Traversal s t a b = ∀ (f ∷ * → *). Applicative f ⇒ (a → f b) → s → f t
+
+-- >>> :info ix
+-- class Ixed m where
+--   ix ∷ Index m → Traversal' m (IxValue m)
+
+-- TODO
+instance Ixed (CaseInsensitive value) where
+  -- ix ∷ Index (CaseInsensitive value) → Traversal' (CaseInsensitive value) (IxValue (CaseInsensitive value))
+  -- ix ∷ String → Traversal' (CaseInsensitive value) value
+  ix ∷ Applicative f ⇒ String → (value → f value) → CaseInsensitive value → f (CaseInsensitive value)
+  -- ix key handler ci = ix (strToLower key) handler ci
+  -- ix key = ix (strToLower key)
+  ix key = unCaseSensitive . ix (strToLower key)
+
+-- >>> :info at
+-- type At ∷ * → Constraint
+-- class Ixed m ⇒ At m where
+--   at ∷ Index m → Lens' m (Maybe (IxValue m))
+
+-- >>> :info Lens
+-- type Lens s t a b = ∀ (f ∷ * → *). Functor f ⇒ (a → f b) → s → f t
+
+instance At (CaseInsensitive value) where
+  -- at ∷ Index (CaseInsensitive value) → Lens' (CaseInsensitive value) (Maybe (IxValue (CaseInsensitive value)))
+  at ∷ String → Lens' (CaseInsensitive value) (Maybe value)
+  -- at key = at (strToLower key)
+  at key = unCaseSensitive . at (strToLower key)
+
+---------------------------------
+-- 8.5 Handling Missing Values --
+---------------------------------
 
 --------------------------------------
 -- Checking whether Updates Succeed --
 --------------------------------------
 
--- It takes an update function and will apply it to all focuses.
--- If it doesn't find any focuses at all then it will return the
--- value of empty for whichever Alternative type is inferred as
--- the return value, but we usually use Nothing from Maybe.
+-- `failover` action
 
 -- actual type signature
 -- failover ∷ Alternative m ⇒ LensLike ((,) Any) s t a b → (a → b) → s → m t
@@ -5123,47 +6229,85 @@ instance At PostalAddress where
 -- specialized type signature
 -- failover ∷ Traversal s t a b → (a → b) → s → Maybe t
 
--- |
--- There's no element at index 6, so the update fails
--- >>> "abcd" & failover (ix 6) toUpper ∷ Maybe String
--- Nothing
+-- It takes an update function and will apply it to all focuses.
+-- If it doesn't find any focuses at all then it will return the
+-- value of empty for whichever Alternative type is inferred as
+-- the return value, but we usually use Nothing from Maybe.
+
+-- there's no element at index 6, so the update fails
+e286 ∷ Maybe String
+e286 = "abcd" & failover (ix 6) toUpper
 
 -- |
+-- >>> e286
+-- Nothing
+
 -- There's an element at index 2, so the update succeeds!
--- >>> "abcd" & failover (ix 2) toUpper ∷ Maybe String
+e287 ∷ Maybe String
+e287 = "abcd" & failover (ix 2) toUpper
+
+-- |
+-- >>> e287
 -- Just "abCd"
 
--- |
--- >>> [] & failover _head (* 10) ∷ Maybe [Int]
--- Nothing
+-- e288
+e288 ∷ Maybe [Int]
+e288 = [] & failover _head (* 10)
 
 -- |
+-- >>> e288
+-- Nothing
+
 -- We can nest traversals; the whole chain fails if it focuses no elements.
--- >>> M.fromList[('a', [1, 2])] & failover (ix 'a' . ix 3) (* 10) ∷ Maybe (M.Map Char [Int])
--- Nothing
+e289 ∷ Maybe (M.Map Char [Int])
+e289 = M.fromList [('a', [1, 2])] & failover (ix 'a' . ix 1) (* 10)
 
 -- |
--- >>> M.fromList[('a', [1, 2])] & failover (ix 'a' . ix 1) (* 10) ∷ Maybe (M.Map Char [Int])
+-- >>> e289
 -- Just (fromList [('a',[1,20])])
 
+-- e290
+e290 ∷ Maybe (M.Map Char [Int])
+e290 = M.fromList [('a', [1, 2])] & failover (ix 'a' . ix 3) (* 10)
+
 -- |
--- It even works with filters.
--- >>> [1, 3, 5] & failover (traversed . filtered even) (* 10) ∷ Maybe [Int]
+-- >>> e290
 -- Nothing
 
--- |
--- >>> [1, 3, 5] & failover (traversed . filtered odd) (* 10) ∷ Maybe [Int]
--- Just [10,30,50]
+-- It even works with filters.
+e291 ∷ Maybe [Int]
+e291 = [1, 3, 5] & failover (traversed . filtered odd) (* 10)
 
 -- |
--- First update will succeed. Note the Alternative constraint on `failover`.
--- >>> let s = "abcdefg"
--- >>> failover (ix 8) toUpper s <|> failover (ix 6) toUpper s <|> failover (ix 4) toUpper s
--- "abcdefG"
+-- >>> e291
+-- Just [10,30,50]
+
+-- e292
+e292 ∷ Maybe [Int]
+e292 = [1, 3, 5] & failover (traversed . filtered even) (* 10)
+
+-- |
+-- >>> e292
+-- Nothing
+
+-- Note the Alternative constraint on `failover`.
+-- >>> :info failover
+-- failover ∷ Alternative m ⇒ LensLike ((,) Any) s t a b → (a → b) → s → m t
+
+e293 ∷ Maybe String
+e293 =
+  let s = "abcdefg"
+   in failover (ix 8) toUpper s <|> failover (ix 6) toUpper s <|> failover (ix 4) toUpper s
+
+-- |
+-- >>> e293
+-- Just "abcdefG"
 
 ------------------------------
 -- Fallbacks with `failing` --
 ------------------------------
+
+-- Making choices based on success or failure within an optics path itself!
 
 -- `failing` combines two optics by trying the first, and falling back on the second.
 
@@ -5171,71 +6315,132 @@ instance At PostalAddress where
 -- failing ∷ Fold      s t a b → Fold      s t a b → Fold      s t a b
 -- failing ∷ Traversal s t a b → Traversal s t a b → Traversal s t a b
 
--- |
 -- Try to get something from index 10, failing that, get something from index 2.
--- >>> M.fromList [('a', 1), ('b', 2)] ^? (ix 'z' `failing` ix 'b')
+e294 ∷ Maybe Integer
+e294 = M.fromList [('a', 1), ('b', 2)] ^? (ix 'z' `failing` ix 'b')
+
+-- |
+-- >>> e294
 -- Just 2
 
--- |
 -- It works with updates as well:
--- >>> M.fromList [('a', 1), ('b', 2)] & (ix 'z' `failing` ix 'b') *~ 10
+e295 ∷ Map Char Integer
+e295 = M.fromList [('a', 1), ('b', 2)] & (ix 'z' `failing` ix 'b') *~ 10
+
+-- |
+-- >>> e295
 -- fromList [('a',1),('b',20)]
 
--- |
 -- Get the first album available in the map in order of preference.
--- >>> M.fromList [("Bieber" ∷ String, "Believe"), ("Beyoncé", "Lemonade")] ^? (ix "Swift" `failing` ix "Bieber" `failing` ix "Beyoncé")
+e296 ∷ Maybe String
+e296 = M.fromList [("Bieber", "Believe"), ("Beyoncé", "Lemonade")] ^? (ix "Swift" `failing` ix "Bieber" `failing` ix "Beyoncé")
+
+-- |
+-- >>> e296
 -- Just "Believe"
 
--- |
 -- The optics we pass to `failing` can be arbitrarily complex so long as the type of the focus is the same for each argument.
--- >>> M.fromList [('a', (1, [2, 3, 4])), ('b', (5, [6, 7, 8]))] ^.. (ix 'z' . _1 `failing` ix 'a' . _2 . ix 10 `failing` ix 'b' . _2 . traversed)
+e297 ∷ [Integer]
+e297 = M.fromList [('a', (1, [2, 3, 4])), ('b', (5, [6, 7, 8]))] ^.. (ix 'z' . _1 `failing` ix 'a' . _2 . ix 10 `failing` ix 'b' . _2 . traversed)
+
+-- |
+-- >>> e297
 -- [6,7,8]
+e298 ∷ [Integer]
+e298 = M.fromList [('a', (1, [2, 3, 4])), ('b', (5, [6, 7, 8]))] ^.. (ix 'z' . _1 `failing` ix 'a' . _2 . ix 1 `failing` ix 'b' . _2 . traversed)
+
+-- |
+-- >>> e298
+-- [3]
 
 ----------------------------------
--- Default Elements Using `non` --
+-- Default Elements using `non` --
 ----------------------------------
 
 -- We configure `non` by passing it a default value.
 -- It uses the default value to build a traversal which focuses the value within a Just,
 -- or in the case of a Nothing focuses the default value instead.
 
--- For all intents and purposes we'll pretend `non` has this signature:
+-- simplified
 -- non ∷ Eq a ⇒ a → Traversal' (Maybe a) a
 
--- This mimics the behavior of `fromMaybe` using optics --
+-- This mimics the behavior of `fromMaybe` using optics.
+-- >>> :type fromMaybe
+-- fromMaybe ∷ a → Maybe a → a
+
+-- e299
+e299 ∷ Integer
+e299 = Nothing ^. non 0
 
 -- |
--- >>> Nothing ^. non 0
+-- >>> e299
 -- 0
 
+-- e300
+e300 ∷ String
+e300 = Nothing ^. non "default"
+
 -- |
--- >>> Nothing ^. non "default"
+-- >>> e300
 -- "default"
 
+-- e301
+e301 ∷ String
+e301 = Just "value" ^. non "default"
+
 -- |
--- >>> Just "value" ^. non "default"
+-- >>> e301
 -- "value"
 
--- `non` becomes much more useful when combined with the `at` combinator --
+-- `non` becomes much more useful when combined with the `at` combinator.
 
--- |
+-- 'at' focuses a value wrapped in Maybe, and Nothing is used if the value is missing.
+-- This behaviour dovetails with non to substitute a default value for missing values.
+
+-- >>> :info at
+-- class Ixed m ⇒ At m where
+--   at ∷ Index m → Lens' m (Maybe (IxValue m))
+
 -- Using `non` unwraps the `Maybe` so we can view values directly.
 -- "Leslie" has a favourite food, so we can look it up:
--- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
--- >>> favouriteFoods ^. at "Leslie" . non "Pizza"
+e302 ∷ String
+e302 =
+  let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+   in favouriteFoods ^. at "Leslie" . non "Pizza"
+
+-- |
+-- >>> e302
 -- "Waffles"
 
--- |
 -- If we don't know someone's favourite food, the default is "Pizza"
--- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
--- >>> favouriteFoods ^. at "Leo" . non "Pizza"
--- "Pizza"
+e303 ∷ String
+e303 =
+  let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+   in favouriteFoods ^. at "Leo" . non "Pizza"
 
 -- |
+-- >>> e303
+-- "Pizza"
+
 -- When setting through `non` it allows us to set values directly without worrying about wrapping them in `Just`.
--- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
--- >>> favouriteFoods & at "Popeye" . non "Pizza" .~ "Spinach"
+e304 ∷ Map String String
+e304 =
+  let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+   in favouriteFoods & at "Popeye" . non "Pizza" .~ "Spinach"
+
+-- |
+-- >>> e304
 -- fromList [("Garfield","Lasagna"),("Leslie","Waffles"),("Popeye","Spinach")]
+
+-- e305
+e305 ∷ Map String String
+e305 =
+  let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+   in favouriteFoods & at "Leslie" . non "Pizza" .~ "Spinach"
+
+-- |
+-- >>> e305
+-- fromList [("Garfield","Lasagna"),("Leslie","Spinach")]
 
 -- `non` has interesting behavior when setting a key to the default value.
 -- It maps the default value back to Nothing, which `at` will be exclude from the map.
@@ -5243,53 +6448,78 @@ instance At PostalAddress where
 -- If we try to view that key later we'll still receive the correct value by using the default.
 -- We can use this to build sparse maps and save some performance if one particular value in the map is very common.
 
--- |
--- Define an alias for our optic with the default value included.
 -- "Garfield" isn't stored when his favourite matches the default.
--- >>> let fav name = at name . non "Pizza"
--- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
--- >>> let newFavourites = favouriteFoods & fav "Garfield" .~ "Pizza"
--- >>> newFavourites
--- fromList [("Leslie","Waffles")]
+e306 ∷ Map String String
+e306 =
+  let fav name = at name . non "Pizza"
+      favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+   in favouriteFoods & fav "Garfield" .~ "Pizza"
 
 -- |
+-- >>> e306
+-- fromList [("Leslie","Waffles")]
+
 -- We still get the correct value when retrieving Garfield's favourite.
--- >>> let fav name = at name . non "Pizza"
--- >>> let favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
--- >>> let newFavourites = favouriteFoods & fav "Garfield" .~ "Pizza"
--- >>> newFavourites ^. fav "Garfield"
+e307 ∷ String
+e307 =
+  let fav name = at name . non "Pizza"
+      favouriteFoods = M.fromList [("Garfield", "Lasagna"), ("Leslie", "Waffles")]
+      newFavourites = favouriteFoods & fav "Garfield" .~ "Pizza"
+   in newFavourites ^. fav "Garfield"
+
+-- |
+-- >>> e307
 -- "Pizza"
 
 -- Let's keep tally of the number of hours each employee has worked in a Map.
 -- If we add hours for an employee missing from the map they should be added as though they had logged 0 hours.
 
--- |
 -- Erin will be added to the map since she's missing.
--- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Erin" . non 0 +~ 10
+e308 ∷ Map String Integer
+e308 = M.fromList [("Jim", 32), ("Dwight", 39)] & at "Erin" . non 0 +~ 10
+
+-- |
+-- >>> e308
 -- fromList [("Dwight",39),("Erin",10),("Jim",32)]
 
--- |
 -- Since Jim already has hours logged we simply increment them.
--- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Jim" . non 0 +~ 8
--- fromList [("Dwight",39),("Jim",40)]
+e309 ∷ Map String Integer
+e309 = M.fromList [("Jim", 32), ("Dwight", 39)] & at "Jim" . non 0 +~ 8
 
 -- |
+-- >>> e309
+-- fromList [("Dwight",39),("Jim",40)]
+
 -- When we pay-out an employee's hours, we set their hours to `0`
 -- `non` removes any keys with the default value from the list entirely!
--- >>> M.fromList [("Jim", 32), ("Dwight", 39)] & at "Dwight" . non 0 .~ 0
+e310 ∷ Map String Integer
+e310 = M.fromList [("Jim", 32), ("Dwight", 39)] & at "Dwight" . non 0 .~ 0
+
+-- |
+-- >>> e310
 -- fromList [("Jim",32)]
 
 -----------------------------------
 -- Checking Fold Success/Failure --
 -----------------------------------
 
--- |
--- >>> fromMaybe 'z' ("abc" ^? ix 1)
--- 'b'
+-- e311
+e311 ∷ Char
+e311 = fromMaybe 'z' ("abc" ^? ix 1)
 
 -- |
--- >>> fromMaybe 'z' ("abc" ^? ix 10)
+-- >>> e311
+-- 'b'
+
+-- e312
+e312 ∷ Char
+e312 = fromMaybe 'z' ("abc" ^? ix 10)
+
+-- |
+-- >>> e312
 -- 'z'
+
+-- We can do something similar with `pre`.
 
 -- `pre` is a version of `preview` as a higher-order optic.
 -- You pass it a fold and it will try to get a value from it, returning `Nothing` if it can't find one.
@@ -5298,19 +6528,31 @@ instance At PostalAddress where
 -- specialized signature
 -- pre ∷ Fold s a → Getter s (Maybe a)
 
--- |
 -- We can combine this with `non` and `ix` to get default values when accessing list elements.
--- >>> "abc" ^. pre (ix 10) . non 'z'
+e313 ∷ Char
+e313 = "abc" ^. pre (ix 10) . non 'z'
+
+-- |
+-- >>> e313
 -- 'z'
 
--- |
 -- We use ^. rather than ^? since `pre` turns the fold into a Getter.
--- >>> [1, 2, 3, 4] ^. pre (traversed . filtered even)
--- Just 2
+e314 ∷ Maybe Integer
+e314 = [1, 2, 3, 4] ^. pre (traversed . filtered even)
 
 -- |
--- >>> [1, 3] ^. pre (traversed . filtered even)
+-- >>> e314
+-- Just 2
+
+-- e315
+e315 ∷ Maybe Integer
+e315 = [1, 3] ^. pre (traversed . filtered even)
+
+-- |
+-- >>> e315
 -- Nothing
+
+-- `pre` isn't very commonly used.
 
 --------------------------------
 -- Exercises - Missing Values --
@@ -5318,39 +6560,75 @@ instance At PostalAddress where
 
 -- 1. Write an optic which focuses the value at key "first" or, failing that, the value at key "second".
 
--- |
--- >>> let optic = ix "first" `failing` ix "second"
--- >>> M.fromList [("first", False), ("second", False)] & optic .~ True
--- fromList [("first",True),("second",False)]
+-- e316
+e316 ∷ Map String Bool
+e316 =
+  let optic = ix "first" `failing` ix "second"
+   in M.fromList [("first", False), ("second", False)] & optic .~ True
 
 -- |
--- >>> let optic = ix "first" `failing` ix "second"
--- >>> M.fromList [("second", False)] & optic .~ True
+-- >>> e316
+-- fromList [("first",True),("second",False)]
+
+-- e317
+e317 ∷ Map String Bool
+e317 =
+  let optic = ix "first" `failing` ix "second"
+   in M.fromList [("no-first", False), ("second", False)] & optic .~ True
+
+-- |
+-- >>> e317
+-- fromList [("no-first",False),("second",True)]
+
+-- e318
+e318 ∷ Map String Bool
+e318 =
+  let optic = ix "first" `failing` ix "second"
+   in M.fromList [("second", False)] & optic .~ True
+
+-- |
+-- >>> e318
 -- fromList [("second",True)]
 
 -- 2. Write an optic which focuses the first element of a tuple iff it is even, and the second tuple element otherwise.
 --    Assume each slot contains an integer.
 
--- |
--- >>> let optic = ix 0 . filtered even `failing` ix 1
--- >>> (2, 2) & optic *~ 10
--- (20,2)
+-- e319
+e319 ∷ (Integer, Integer)
+e319 = let optic = ix 0 . filtered even `failing` ix 1
+         in (2, 2) & optic *~ 10
 
 -- |
--- >>> let optic = ix 0 . filtered even `failing` ix 1
--- >>> (1, 1) & optic *~ 10
+-- >>> e319
+-- (20,2)
+
+-- e320
+e320 ∷ (Integer, Integer)
+e320 = let optic = ix 0 . filtered even `failing` ix 1
+         in (1, 1) & optic *~ 10
+
+-- |
+-- >>> e320
 -- (1,10)
 
 -- 3. Write an optic which focuses all even numbers in a list, if none of the members are even then focus ALL numbers in the list.
 
--- |
--- >>> let optic = traversed . filtered even `failing` traversed
--- >>> [1, 2, 3, 4] ^.. optic
--- [2,4]
+-- e321
+e321 ∷ [Integer]
+e321 = let optic = traversed . filtered even `failing` traversed
+         in [1, 2, 3, 4] ^.. optic
 
 -- |
--- >>> let optic = traversed . filtered even `failing` traversed
--- >>> [1, 3, 5] ^.. optic
+-- >>> e321
+-- [2,4]
+
+-- e322
+e322 ∷ [Integer]
+e322 = let optic = traversed . filtered even `failing` traversed
+         in [1, 3, 5] ^.. optic
+
+-- |
+-- >>> e322
 -- [1,3,5]
 
 -- 4. Fill in the blanks!
@@ -5374,6 +6652,14 @@ instance At PostalAddress where
 -- >>> M.fromList [("Breath of the wild", 22000000), ("Odyssey", 9070000)] & at "Wario's Woods" . non 0 +~ 999
 -- fromList [("Breath of the wild",22000000),("Odyssey",9070000),("Wario's Woods",999)]
 
+-- e323
+e323 ∷ String
+e323 = ["Math", "Science", "Geography"] ^. pre (ix 100) . non "Unscheduled"
+
+-- |
+-- >>> e323
+-- "Unscheduled"
+
 -- |
 --     ["Math", "Science", "Geography"] ^. _            . non "Unscheduled"
 -- >>> ["Math", "Science", "Geography"] ^. pre (ix 100) . non "Unscheduled"
@@ -5382,14 +6668,29 @@ instance At PostalAddress where
 -- BONUS: Excellent example for `pre`!
 -- Use 'pre' and 'non'
 
+-- e324
+e324 ∷ [Integer]
+e324 = [1, 2, 3, 4] ^.. traversed . pre (filtered even) . non (-1)
+
+-- |
+-- >>> e324
+-- [-1,2,-1,4]
+
+-- >>> [1, 2, 3, 4] ^.. traversed . pre (filtered even) -- . non (-1)
+-- [Nothing,Just 2,Nothing,Just 4]
+
 -- |
 --     [1, 2, 3, 4] ^.. _
 -- >>> [1, 2, 3, 4] ^.. traversed . pre (filtered even) . non (-1)
 -- [-1,2,-1,4]
 
 --------------------------------------------------------------------------------------------
---                                         Prisms                                         --
+--                                      9. Prisms                                         --
 --------------------------------------------------------------------------------------------
+
+--------------------------------
+-- 9.1 Introduction to Prisms --
+--------------------------------
 
 -------------------------------------------
 -- How do Prisms Fit into the Hierarchy? --
@@ -5403,7 +6704,7 @@ instance At PostalAddress where
 -- Prism      | Zero/One |  Zero/One  | Zero/One |  One
 
 -- Prisms can be run BACKWARDS, taking a focus and embedding it into a structure!
--- We'll see how prisms are a natural candidate for specifying PATTERN-MATCHING semantics and help to work with sum-types as well.
+-- We'll see how prisms are a natural candidate for specifying PATTERN-MATCHING semantics and help to work with sum types as well.
 
 -- For running a Prism forwards  run `preview` (^?).
 -- For running a Prism backwards run `review`  (#).
@@ -5417,56 +6718,99 @@ instance At PostalAddress where
 -- _Left  ∷ Prism (Either l r) (Either l' r ) l l'
 -- _Right ∷ Prism (Either l r) (Either l  r') r r'
 
--- These prisms will pattern match on the Left or Right side of the either type, focusing on the value inside.
+-- These prisms will pattern match on the Either type, focusing on the value inside.
 -- We can use `preview` (^?) to "run" the pattern match, returning Nothing if it's not a match:
 
+-- e325
+e325 ∷ Maybe String
+e325 = Left "message" ^? _Left
+
 -- |
--- >>> Left "message" ^? _Left
+-- >>> e325
 -- Just "message"
 
--- |
--- >>> Left "message" ^? _Right
--- Nothing
+-- e326
+e326 ∷ Maybe a
+e326 = Left "message" ^? _Right
 
 -- |
--- >>> Right 42 ^? _Right
+-- >>> e326
+-- Nothing
+
+-- e327
+e327 ∷ Maybe Integer
+e327 = Right 42 ^? _Right
+
+-- |
+-- >>> e327
 -- Just 42
 
+-- e328
+e328 ∷ Maybe a
+e328 = Right 42 ^? _Left
+
 -- |
--- >>> Right 42 ^? _Left
+-- >>> e328
 -- Nothing
 
--- |
 -- Since prisms are valid traversals we can set, update, or traverse the focused value through them.
--- >>> Left 10 & _Left +~ 5
--- Left 15
+e329 ∷ Either Integer b
+e329 = Left 10 & _Left +~ 5
 
 -- |
--- >>> Right "howdy" & _Right %~ reverse
+-- >>> e329
+-- Left 15
+
+-- e330
+e330 ∷ Either a String
+e330 = Right "howdy" & _Right %~ reverse
+
+-- |
+-- >>> e330
 -- Right "ydwoh"
 
 -- Analogously for `Maybe`.
 -- _Nothing ∷ Prism' (Maybe a) ()
 -- _Just    ∷ Prism  (Maybe a) (Maybe b) a b
 
+-- e331
+e331 ∷ Maybe ()
+e331 = Nothing ^? _Nothing
+
 -- |
--- >>> Nothing ^? _Nothing
+-- >>> e331
 -- Just ()
 
--- |
--- >>> Nothing ^? _Just
--- Nothing
+-- e332
+e332 ∷ Maybe a
+e332 = Nothing ^? _Just
 
 -- |
--- >>> Just "gold" ^? _Just
+-- >>> e332
+-- Nothing
+
+-- e333
+e333 ∷ Maybe String
+e333 = Just "gold" ^? _Just
+
+-- |
+-- >>> e333
 -- Just "gold"
 
--- |
--- >>> Just "gold" ^? _Nothing
--- Nothing
+-- e334
+e334 ∷ Maybe ()
+e334 = Just "gold" ^? _Nothing
 
 -- |
--- >>> Just 20 & _Just %~ (+ 10)
+-- >>> e334
+-- Nothing
+
+-- e335
+e335 ∷ Maybe Integer
+e335 = Just 20 & _Just %~ (+ 10)
+
+-- |
+-- >>> e335
 -- Just 30
 
 -----------------------------------------------------------
@@ -5476,28 +6820,48 @@ instance At PostalAddress where
 -- has   ∷ Fold  s   a   → s → Bool
 -- isn't ∷ Prism s t a b → s → Bool
 
--- `has` checks whether the given fold yields any elements when run on the provided structure; while
+-- There's also an `is` to match `isn't`, but that's hidden away in the Control.Lens.Extras module to avoid naming conflicts.
+-- So usually it's more convenient to use `has`.
+
+-- `has` checks whether the given fold yields any elements when run on the provided structure
 -- `isn't` returns whether a given prism does not match the input.
 
+-- e336
+e336 ∷ Bool
+e336 = has _Right (Left "message")
+
 -- |
--- >>> has _Right (Left "message")
+-- >>> e336
 -- False
 
--- |
--- >>> has _Right (Right 37)
--- True
+-- e337
+e337 ∷ Bool
+e337 = has _Right (Right 37)
 
 -- |
--- >>> isn't _Nothing (Just 12)
+-- >>> e337
 -- True
 
+-- e338
+e338 = isn't _Nothing (Just 12)
+
 -- |
--- >>> isn't _Left (Left ())
+-- >>> e338
+-- True
+
+-- e339
+e339 ∷ Bool
+e339 = isn't _Left (Left ())
+
+-- |
+-- >>> e339
 -- False
 
 -----------------------------------------
 -- Generating Prisms with `makePrisms` --
 -----------------------------------------
+
+-- simplified representation of HTTP web requests
 
 -- A path is a list of URL segments.
 type Path = [String]
@@ -5513,31 +6877,51 @@ data Request where
 -- Creates `_Post` `_Get` and `_Delete` prisms.
 makePrisms ''Request
 
--- See also `:browse` in the REPL:
+-- `:browse` in the REPL:
 -- _Post   ∷ Prism' Request (Path, Body)  -- Note the tuple!
 -- _Get    ∷ Prism' Request  Path
 -- _Delete ∷ Prism' Request  Path
 
 -- This is all we need to use these prisms for getting or setting as if they were traversals.
 
+-- e340
+e340 ∷ Maybe Path
+e340 = Get ["users"] ^? _Get
+
 -- |
--- >>> Get ["users"] ^? _Get
+-- >>> e340
 -- Just ["users"]
 
+-- e341
+e341 ∷ Maybe (Path, Body)
+e341 = Get ["users"] ^? _Post
+
 -- |
--- >>> Get ["users"] ^? _Post
+-- >>> e341
 -- Nothing
 
+-- e342
+e342 ∷ Request
+e342 = Get ["users"] & _Get .~ ["posts"]
+
 -- |
--- >>> Get ["users"] & _Get .~ ["posts"]
+-- >>> e342
 -- Get ["posts"]
 
--- |
--- >>> Post ["users"] "name: John" ^? _Post
--- Just (["users"],"name: John")
+-- e343
+e343 ∷ Maybe (Path, Body)
+e343 = Post ["users"] "name: John" ^? _Post
 
 -- |
--- >>> Post ["users"] "name: John" & _Post . _1 <>~ ["12345"]
+-- >>> e343
+-- Just (["users"],"name: John")
+
+-- e344
+e344 ∷ Request
+e344 = Post ["users"] "name: John" & _Post . _1 <>~ ["12345"]
+
+-- |
+-- >>> e344
 -- Post ["users","12345"] "name: John"
 
 ----------------------------------
@@ -5547,8 +6931,7 @@ makePrisms ''Request
 -- Every prism represents a pattern-match which can be REVERSED!
 -- By feeding a prism a focus we can embed that focus into a structure via the context implied by the pattern!
 -- Even though viewing through a prism may fail if the pattern doesn't match, embedding a value into a pattern using a prism always succeeds!
--- To run a prism backwards we use the `review` (#), which you can think of as short for "reverse view".
--- It embeds the focus into the prism's pattern.
+-- To run a prism backwards we use the `review` (#), which you can think of as short for "reverse view". It embeds the focus into the prism's pattern.
 
 -- (#) is comparable to the pipe operator in PureScript.
 -- PureScript's (#) is (&) in Haskell.
@@ -5559,65 +6942,116 @@ makePrisms ''Request
 -- Prisms which match on a constructor of some type can be reversed to embed fields into the constructor.
 -- The reverse of unpacking a specific constructor is to pack those fields into that constructor.
 
--- |
--- >>> Get ["posts"]
--- Get ["posts"]
+-- e345
+e345 ∷ Request
+e345 = Get ["posts"]
 
 -- |
--- >>> review _Get ["posts"]
+-- >>> e345
 -- Get ["posts"]
 
--- |
--- using the infix operator
--- >>> _Get # ["posts"]
--- Get ["posts"]
+-- e346
+e346 ∷ Request
+e346 = review _Get ["posts"]
 
 -- |
--- >>> Delete ["posts"]
+-- >>> e346
+-- Get ["posts"]
+
+-- e347
+e347 ∷ Request
+e347 = _Get # ["posts"]
+
+-- |
+-- >>> e347
+-- Get ["posts"]
+
+-- e348
+e348 ∷ Request
+e348 = Delete ["posts"]
+
+-- |
+-- >>> e348
 -- Delete ["posts"]
 
--- |
--- >>> _Delete # ["posts"]
--- Delete ["posts"]
+-- e349
+e349 ∷ Request
+e349 = _Delete # ["posts"]
 
 -- |
--- >>> Post ["posts"] "My blog post"
+-- >>> e349
+-- Delete ["posts"]
+
+-- e350
+e350 ∷ Request
+e350 = Post ["posts"] "My blog post"
+
+-- |
+-- >>> e350
 -- Post ["posts"] "My blog post"
 
--- |
 -- Constructors with multiple fields accept a tuple of the fields.
--- >>> _Post # (["posts"], "My blog post")
+e351 ∷ Request
+e351 = _Post # (["posts"], "My blog post")
+
+-- |
+-- >>> e351
 -- Post ["posts"] "My blog post"
 
--- |
--- >>> Left "an error"
--- Left "an error"
+-- e352
+e352 ∷ Either String a
+e352 = Left "an error"
 
 -- |
+-- >>> e352
+-- Left "an error"
+
 -- constructing a `Left` from a string
--- >>> review _Left "an error"
--- Left "an error"
+e353 ∷ Either String a
+e353 = review _Left "an error"
 
 -- |
+-- >>> e353
+-- Left "an error"
+
 -- constructing a `Left` from a string
--- >>> _Left # "an error"
+e354 ∷ Either [Char] c
+e354 = _Left # "an error"
+
+-- |
+-- >>> e354
 -- Left "an error"
 
--- |
--- >>> Right 42
--- Right 42
+-- e355
+e355 ∷ Either a Integer
+e355 = Right 42
 
 -- |
--- >>> review _Right 42
+-- >>> e355
 -- Right 42
 
--- |
--- >>> _Right # 42
--- Right 42
+-- e356
+e356 ∷ Either a Integer
+e356 = review _Right 42
 
 -- |
+-- >>> e356
+-- Right 42
+
+-- e357
+e357 ∷ Either a Integer
+e357 = _Right # 42
+
+-- |
+-- >>> e357
+-- Right 42
+
 -- Since composing prisms results in a new prism, we can compose prisms before passing them to review to build a nested constructor function.
--- >>> _Just . _Left # 1337
+e358 ∷ Maybe (Either Integer a)
+e358 = _Just . _Left # 1337
+
+-- |
+-- >>> e358
 -- Just (Left 1337)
 
 -- We could and should use the normal constructors.
@@ -5630,62 +7064,103 @@ makePrisms ''Request
 -- Although most of the prisms you'll encounter will be used for matching on data type constructors, prisms can also encode more complex and abstract patterns.
 -- Unlike regular pattern matching if a prism fails to match it won't crash, instead the prism simply won't focus anything.
 
--- The `_Cons` prism handles the common task of peeling an element off the top of a list-like type, e.g. lists, vectors, Strings, ...
+-- The `_Cons` prism handles the common task of peeling an element off the top of a list-like type.
+
+-- e359
+e359 ∷ Maybe (Integer, [Integer])
+e359 = [1, 2, 3] ^? _Cons
 
 -- |
--- `_Cons` is a prism.
--- >>> [1, 2, 3] ^? _Cons
+-- >>> e359
 -- Just (1,[2,3])
 
--- specialized type signature for String
--- _Cons ∷ Prism' String (Char, String)
+-- e360
+e360 ∷ Maybe (Char, String)
+e360 = "Freedom!" ^? _Cons
 
 -- |
--- >>> "Freedom!" ^? _Cons
+-- >>> e360
 -- Just ('F',"reedom!")
 
+-- e361
+e361 ∷ Maybe (Char, String)
+e361 = "" ^? _Cons
+
 -- |
--- >>> "" ^? _Cons
+-- >>> e361
 -- Nothing
 
+-- e362
+e362 ∷ String
+e362 = "Freedom!" & _Cons . _2 %~ reverse
+
 -- |
--- >>> "Freedom!" & _Cons . _2 %~ reverse
+-- >>> e362
 -- "F!modeer"
 
+-- Since `_Cons` is a prism we can run it backwards using. This operation will never fail.
+e363 ∷ String
+e363 = _Cons # ('F', "reedom")
+
 -- |
--- Since `_Cons` is a prism we can run it backwards using `review` (#) to cons an element onto the front of a list-like type.
--- This operation will never fail!
--- >>> _Cons # ('F', "reedom")
+-- >>> e363
 -- "Freedom"
 
+-- e364
+e364 ∷ String
+e364 = "Freedom" & _tail %~ reverse
+
 -- |
--- >>> "Freedom" & _tail %~ reverse
+-- >>> e364
 -- "Fmodeer"
 
+-- e365
+e365 ∷ String
+e365 = "Hello" & _head .~ 'J'
+
 -- |
--- >>> "Hello" & _head .~ 'J'
+-- >>> e365
 -- "Jello"
 
+-- does not fail
+e366 ∷ String
+e366 = "" & _head .~ 'J'
+
 -- |
--- >>> "" & _head .~ 'J'
+-- >>> e366
 -- ""
 
+-- e367
+e367 ∷ Bool
+e367 = isn't _Empty []
+
 -- |
--- >>> isn't _Empty []
+-- >>> e367
 -- False
 
--- |
--- >>> isn't _Empty [1, 2, 3]
--- True
+-- e368
+e368 ∷ Bool
+e368 = isn't _Empty [1, 2, 3]
 
 -- |
+-- >>> e368
+-- True
+
 -- The phrasing for 'has' isn't quite as clear.
 -- Feel free to simply define 'is = has' if that helps!!!
--- >>> has _Empty M.empty
--- True
+e369 ∷ Bool
+e369 = has _Empty M.empty
 
 -- |
--- >>> has _Empty (S.fromList [1, 2, 3])
+-- >>> e369
+-- True
+
+-- e370
+e370 ∷ Bool
+e370 = has _Empty (S.fromList [1, 2, 3])
+
+-- |
+-- >>> e370
 -- False
 
 -- The `_Show` prism can Read or Show values to and from their String representations.
@@ -5695,29 +7170,52 @@ makePrisms ''Request
 
 -- _Show ∷ (Read a, Show a) ⇒ Prism' String a
 
+-- e371
+e371 ∷ Maybe Int
+e371 = "12" ^? _Show ∷ Maybe Int
+
 -- |
--- >>> "12" ^? _Show ∷ Maybe Int
+-- >>> e371
 -- Just 12
 
--- |
--- The type we assert is important. If we pick a different type it changes the behavior.
--- >>> "12" ^? _Show ∷ Maybe Bool
--- Nothing
+-- e372
+e372 ∷ Maybe Bool
+e372 = "12" ^? _Show ∷ Maybe Bool
 
 -- |
--- >>> "apple pie" ^? _Show ∷ Maybe Int
+-- >>> e372
 -- Nothing
 
+-- e373
+e373 ∷ Maybe Bool
+e373 = "True" ^? _Show ∷ Maybe Bool
+
 -- |
+-- >>> e373
+-- Just True
+
+-- e374
+e374 ∷ Maybe Int
+e374 = "apple pie" ^? _Show ∷ Maybe Int
+
+-- |
+-- >>> e374
+-- Nothing
+
 -- Get a list of all Integers in a sentence!
--- >>> "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Int]
+e375 ∷ [Int]
+e375 = "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Int]
+
+-- |
+-- >>> e375
 -- [3,5]
 
+-- e376
+e376 ∷ [Bool]
+e376 = "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Bool]
+
 -- |
--- Make sure you specify the correct output type.
--- `_Show` uses the output type to decide what to try to read.
--- Changing the expected type can even change the result!
--- >>> "It's True that I ate 3 apples and 5 oranges" ^.. worded . _Show ∷ [Bool]
+-- >>> e376
 -- [True]
 
 ------------------------
@@ -5727,15 +7225,15 @@ makePrisms ''Request
 -- 1. Which prisms will be generated from the following data declaration? Give their names and types!
 
 data ContactInfo where
-  CiEmail ∷ String → ContactInfo
-  CiTelephone ∷ Int → ContactInfo
-  CiAddress ∷ String → String → String → ContactInfo
+  CIEmail ∷ String → ContactInfo
+  CITelephone ∷ Int → ContactInfo
+  CIAddress ∷ String → String → String → ContactInfo
 
 makePrisms ''ContactInfo
 
--- _CiEmail     ∷ Prism' ContactInfo String
--- _CiTelephone ∷ Prism' ContactInfo Int
--- _CiAddress   ∷ Prism' ContactInfo (String, String, String)
+-- _CIEmail     ∷ Prism' ContactInfo String
+-- _CITelephone ∷ Prism' ContactInfo Int
+-- _CIAddress   ∷ Prism' ContactInfo (String, String, String)
 
 -- 2. Fill in the blanks
 
@@ -5764,6 +7262,14 @@ makePrisms ''ContactInfo
 -- >>> _Cons # ("Do",["Re", "Mi"])
 -- ["Do","Re","Mi"]
 
+-- e377
+e377 ∷ Bool
+e377 = isn't (_Show ∷ Prism' String Bool) "not an int"
+
+-- |
+-- >>> e377
+-- True
+
 -- |
 --     isn't (_Show ∷ _) "not an int"
 -- >>> isn't (_Show ∷ Prism' String Bool) "not an int"
@@ -5787,6 +7293,10 @@ makePrisms ''ContactInfo
 -- >>> ('x', "yz") & review _Cons & _tail %~ reverse
 -- "xzy"
 
+-- |
+-- >>> _Cons # ('x', "yz") & _tail %~ reverse
+-- "xzy"
+
 -- c)
 -- input  = "do the hokey pokey"
 -- output = Left (Just (Right "do the hokey pokey"))
@@ -5795,9 +7305,9 @@ makePrisms ''ContactInfo
 -- >>> _Left . _Just . _Right # "do the hokey pokey"
 -- Left (Just (Right "do the hokey pokey"))
 
----------------------------
--- Writing Custom Prisms --
----------------------------
+-------------------------------
+-- 9.2 Writing Custom Prisms --
+-------------------------------
 
 -- We can build a prism for any pattern which we can reverse.
 -- We can imagine a prism as "refracting" your data, splitting it up and focusing only the pieces which match the pattern, dissipating the rest.
