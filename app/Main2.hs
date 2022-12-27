@@ -9391,7 +9391,6 @@ e481 = populationMap ^@.. itraversed .++ itraversed
 -- >>> (M.fromList [('a', 1), ('b', 2)], M.fromList [('c', 3), ('d', 4)]) ^@.. both . itraversed
 -- [('a',1),('b',2),('c',3),('d',4)]
 
-
 -- |
 --     M.fromList [('a', (True, 1)), ('b', (False, 2))] ^@.. itraversed _  _1
 -- >>> M.fromList [('a', (True, 1)), ('b', (False, 2))] ^@.. itraversed <. _1
@@ -9444,7 +9443,7 @@ e483 = itraverseOf_ itraversed (\n s → putStrLn (show n <> ": " <> s)) ["Go sh
 
 -- get list elements with an 'even' list index
 e484 ∷ String
-e484 = ['a'..'z'] ^.. itraversed . indices even
+e484 = ['a' .. 'z'] ^.. itraversed . indices even
 
 -- |
 -- >>> e484
@@ -9452,8 +9451,9 @@ e484 = ['a'..'z'] ^.. itraversed . indices even
 
 -- e485
 e485 ∷ [Integer]
-e485 = let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87) , ("Death of Superman", 92)]
-          in ratings ^.. itraversed . indices (has (prefixed "Dark"))
+e485 =
+  let ratings = M.fromList [("Dark Knight", 94), ("Dark Knight Rises", 87), ("Death of Superman", 92)]
+   in ratings ^.. itraversed . indices (has (prefixed "Dark"))
 
 -- |
 -- >>> e485
@@ -9464,7 +9464,7 @@ e485 = let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87
 
 -- e486
 e486 ∷ Maybe Char
-e486 = ['a'..'z'] ^? itraversed . index 10
+e486 = ['a' .. 'z'] ^? itraversed . index 10
 
 -- |
 -- >>> e486
@@ -9472,8 +9472,9 @@ e486 = ['a'..'z'] ^? itraversed . index 10
 
 -- e487
 e487 ∷ Maybe Integer
-e487 = let ratings = M.fromList [ ("Dark Knight", 94) , ("Dark Knight Rises", 87) , ("Death of Superman", 92)]
-         in ratings ^? itraversed . index "Death of Superman"
+e487 =
+  let ratings = M.fromList [("Dark Knight", 94), ("Dark Knight Rises", 87), ("Death of Superman", 92)]
+   in ratings ^? itraversed . index "Death of Superman"
 
 -- |
 -- >>> e487
@@ -9873,8 +9874,10 @@ charCoords = lined <.> itraversed
 --                             12. Dealing with Type Errors                               --
 --------------------------------------------------------------------------------------------
 
+-- You can skip this chapter.
+
 ---------------------------------------------
--- 12.1 Interpreting expanded optics types --
+-- 12.1 Interpreting Expanded Optics Types --
 ---------------------------------------------
 
 -- |
@@ -10018,8 +10021,11 @@ printUser = do
   user ← asks _currentUser
   liftIO . putStrLn $ "Current user: " <> user
 
--- The equivalent lensy version just uses `view`.
--- This is actually the exact same `view` function we're used to using with lenses!
+-- view is already in a monadic context
+-- >>> :info view
+-- view ∷ MonadReader s m ⇒ Getting a s a → m a
+
+-- We can simply use `view`.
 printUser' ∷ ReaderT Env IO ()
 printUser' = do
   user ← view currentUser
@@ -10034,15 +10040,18 @@ getUserPassword = do
   maybePassword ← preview (users . ix userName)
   liftIO $ print maybePassword
 
--- Using `view` is the idiomatic way of accessing your environment if you've got lenses defined for your environment.
+-- If you've got lenses defined for your environment using `view` is the idiomatic way of accessing your environment.
 
------------------------------
--- State Monad Combinators --
------------------------------
+----------------------------------
+-- 13.2 State Monad Combinators --
+----------------------------------
 
 data Till where
   Till ::
-    {_total ∷ Double, _sales ∷ [Double], _taxRate ∷ Double} ->
+    { _total ∷ Double,
+      _sales ∷ [Double],
+      _taxRate ∷ Double
+    } ->
     Till
   deriving (Show)
 
@@ -10053,47 +10062,56 @@ makeLenses ''Till
 saleCalculation ∷ StateT Till IO ()
 saleCalculation = do
   total .= 0
-  total += 8.55 -- Delicious Hazy IPA
-  total += 7.36 -- Red Grapefruit Sour
-  totalSale ← use total -- `use` is like `view`, but for MonadState rather than MonadReader!
+  total += 8.55 ----------------------------------------- Delicious Hazy IPA
+  total += 7.36 ----------------------------------------- Red Grapefruit Sour
+  totalSale ← use total --------------------------------- `use` is like `view`, but for MonadState rather than MonadReader!
   liftIO $ printf "Total sale: $%.2f\n" totalSale
   sales <>= [totalSale]
-  total <~ uses taxRate (totalSale *) -- store (<~) it into our total using the total lens
+  total <~ uses taxRate (totalSale *) ------------------- store (<~) it into our total using the total lens
   taxIncluded ← use total
   liftIO $ printf "Tax included: $%.2f\n" taxIncluded
 
--- |
--- execStateT saleCalculation (Till 0 [] 1.19)
+-- e496
+e496 ∷ IO Till
+e496 = execStateT saleCalculation (Till 0 [] 1.19)
+
+-- >>> till ← e496
 -- Till {_total = 18.9329, _sales = [15.91], _taxRate = 1.19}
 
--- All of these MonadState combinators have alternate versions which return the existing or altered versions of the focus, see `(<+=)`, `(<<+=)`, `(<<∼)`, etc...
+-- All of these MonadState combinators have alternate versions which return the existing or altered versions of the focus,
+-- `(<+=)`, `(<<+=)`, `(<<∼)`, etc...
 
---------------------
--- Magnify & Zoom --
---------------------
+-- There are also combinators for dealing with MonadWriter but these come up rarely.
+
+-----------------------------
+-- 13.3 `magnify` & `zoom` --
+-----------------------------
+
+-- The lens library provides combinators which allow us to ‘re-scope’ a Reader (→ `magnify`) or State (→ `zoom`) monad to a portion of the type focused by a lens.
 
 data Weather where
-  Weather ∷ {_temp ∷ Float, _pressure ∷ Float} → Weather
+  Weather ∷ {_temp ∷ Float,
+             _pressure ∷ Float} → Weather
   deriving (Show)
 
 makeLenses ''Weather
 
 printData ∷ String → ReaderT Float IO ()
 printData statName = do
-  num ← ask -- `num` can be any Float from any lens, e.g. `temp` and `pressure`.
+  num ← ask ---------------------------------------- `num` can be any Float from any lens, i.e. `temp` or `pressure`.
   liftIO . putStrLn $ statName <> ": " <> show num
 
 -- `magnify` is used for Reader monads.
--- magnify ∷ Lens' s a → ReaderT a m r → ReaderT s m r
+--  magnify ∷ Lens' s a → ReaderT a m r → ReaderT s m r
 
+-- embed printData
 weatherStats ∷ ReaderT Weather IO ()
 weatherStats = do
-  magnify temp (printData "temp") -- `magnify` et. al. allow us to ‘re-scope’ a Reader or State monad to a portion of the type focused by a lens.
-  magnify pressure (printData "pressure") -- `temp` and `pressure` can use the same function (`printData`).
+  magnify temp {-     -} (printData "temp") ------ `magnify` et. al. allow us to ‘re-scope’ a Reader or State monad to a portion of the type focused by a lens.
+  magnify pressure {- -} (printData "pressure") -- `temp` and `pressure` can use the same function (`printData`).
 
--- |
 -- By magnifying the Reader environment through a lens which focuses a Float we can run `printData` against that particular stat!
--- runReaderT weatherStats (Weather 15 7.2)
+-- >>> runReaderT weatherStats (Weather 15 7.2)
 -- temp: 15.0
 -- pressure: 7.2
 
@@ -10104,7 +10122,7 @@ convertCelsiusToFahrenheit = modify (\celsius → (celsius * (9 / 5)) + 32)
 -- `zoom` is used for State monads.
 -- zoom ∷ Monad m ⇒ Lens' s a → StateT a m r → StateT s m r
 
--- In order to run it in a State monad over the Weather type we'll need to zoom-in on the temperature when we run it.
+-- In order to run it in a State monad over the Weather type we'll need to zoom in on the temperature when we run it.
 weatherStats' ∷ StateT Weather IO ()
 weatherStats' = zoom temp convertCelsiusToFahrenheit
 
@@ -10112,15 +10130,19 @@ weatherStats' = zoom temp convertCelsiusToFahrenheit
 -- >>> execStateT weatherStats' (Weather 32 12)
 -- Weather {_temp = 89.6, _pressure = 12.0}
 
--------------------
--- Classy Lenses --
--------------------
+-----------------------
+-- 14. Classy Lenses --
+-----------------------
 
------------------------------------------------------
--- What are Classy Lenses and When Do I Need Them? --
------------------------------------------------------
+----------------------------------------------------------
+-- 14.1 What are Classy Lenses and When Do I Need Them? --
+----------------------------------------------------------
 
--- Classy lenses aren't really a new type of optic so much as a whole DESIGN PATTERN.
+-- Classy lenses aren't really a new type of optic so much as a whole DESIGN PATTERN solving the following issues:
+--
+-- • Duplicate Record Fields
+-- • Separating Logic
+-- • Granular Dependencies
 
 --------------------------------
 -- No Duplicate Record Fields --
@@ -10272,9 +10294,9 @@ makeFields ''EnvDb
 
 -- See app/Init.hs
 
-----------------------------------
--- `makeFields` vs `makeClassy` --
-----------------------------------
+---------------------------------------
+-- 14.2 `makeFields` vs `makeClassy` --
+---------------------------------------
 
 data People where
   People ::
