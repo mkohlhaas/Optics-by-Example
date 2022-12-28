@@ -1,12 +1,18 @@
+{-# LANGUAGE GADTs #-}
+
 module Init (HasHName (..), HasPNumber (..), initialisieren) where
 
 import Control.Lens
 import Control.Monad.Reader
 
-data InitFields = InitFields {_hName ∷ String, _pNumber ∷ Int}
+data InitFields where
+  InitFields ∷
+    { _hName ∷ String,
+      _pNumber ∷ Int
+    } →
+    InitFields
 
 makeFieldsNoPrefix ''InitFields
-
 
 -- A benefit of field typeclasses is that they're specified with constraints, and constraints compose!
 -- This means that if we want to accept a record with multiple specific fields we can do so easily by just adding multiple Has* constraints.

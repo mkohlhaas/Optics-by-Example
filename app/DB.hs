@@ -1,3 +1,5 @@
+-- {-# OPTIONS_GHC -ddump-splices #-}
+
 -- We don't need to export DbFields or it's record accessors at all.
 -- It exists solely to define the fields needed by the module.
 module DB (DatabaseUrl, HasDatenbankUrl (..), connectDatenbank) where
@@ -9,9 +11,16 @@ type DatabaseUrl = String
 
 -- `DbFields` is a DUMMY RECORD which exposes the fields used in other records.
 -- The field prefix `dbFields` must be spelled exactly like this or `makeFields` will ignore it.
--- The prefix must be the exact name of the record, but with the first letter lowercased.
+-- The prefix must be the exact name of the record with the first letter lowercased.
 newtype DbFields = DbFields {_dbFieldsDatenbankUrl ∷ DatabaseUrl}
--- creates HasDatenbankUrl (and more)
+--
+-- creates:
+--
+-- class HasDatenbankUrl s a | s -> a where
+--   datenbankUrl :: Lens' s a
+-- instance HasDatenbankUrl DbFields DatabaseUrl where
+--   datenbankUrl = (iso (\ (DbFields x) -> x)) DbFields
+--
 makeFields ''DbFields
 
 -- If we're not worried about record-accessor conflicts we can use `makeFieldsNoPrefix`.
