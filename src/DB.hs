@@ -4,8 +4,8 @@
 -- It exists solely to define the fields needed by the module.
 module DB (DatabaseUrl, HasDatenbankUrl (..), connectDatenbank) where
 
-import Control.Lens
-import Control.Monad.Reader
+import Control.Lens (makeFields, view)
+import Control.Monad.Reader (MonadIO (..), MonadReader)
 
 type DatabaseUrl = String
 
@@ -13,13 +13,14 @@ type DatabaseUrl = String
 -- The field prefix `dbFields` must be spelled exactly like this or `makeFields` will ignore it.
 -- The prefix must be the exact name of the record with the first letter lowercased.
 newtype DbFields = DbFields {_dbFieldsDatenbankUrl ∷ DatabaseUrl}
+
 --
 -- creates:
 --
--- class HasDatenbankUrl s a | s -> a where
---   datenbankUrl :: Lens' s a
+-- class HasDatenbankUrl s a | s → a where
+--   datenbankUrl ∷ Lens' s a
 -- instance HasDatenbankUrl DbFields DatabaseUrl where
---   datenbankUrl = (iso (\ (DbFields x) -> x)) DbFields
+--   datenbankUrl = (iso (\ (DbFields x) → x)) DbFields
 --
 makeFields ''DbFields
 

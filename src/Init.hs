@@ -1,9 +1,9 @@
-{-# LANGUAGE GADTs #-}
+-- {-# OPTIONS_GHC -ddump-splices #-}
 
 module Init (HasHName (..), HasPNumber (..), initialisieren) where
 
-import Control.Lens
-import Control.Monad.Reader
+import Control.Lens (makeFieldsNoPrefix, view)
+import Control.Monad.Reader (MonadIO (..), MonadReader)
 
 data InitFields where
   InitFields ∷

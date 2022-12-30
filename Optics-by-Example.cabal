@@ -2,60 +2,33 @@ cabal-version: 2.4
 name:          Optics-by-Example
 version:       0.1.0.0
 
-library dbclassy
-    exposed-modules:    DBClassy
-    hs-source-dirs:     app
-    default-language:   Haskell2010
-    default-extensions:
-        FlexibleContexts FlexibleInstances FunctionalDependencies
-        TemplateHaskell TypeSynonymInstances UnicodeSyntax
-
-    build-depends:
-        base ^>=4.14.3.0,
-        lens >=5.1.1 && <5.2,
-        mtl >=2.2.2 && <2.3
-
-library init
-    exposed-modules:    Init
-    hs-source-dirs:     app
-    default-language:   Haskell2010
-    default-extensions:
-        FlexibleContexts FlexibleInstances FunctionalDependencies
-        TemplateHaskell TypeSynonymInstances UnicodeSyntax
-
-    build-depends:
-        base ^>=4.14.3.0,
-        lens >=5.1.1 && <5.2,
-        mtl >=2.2.2 && <2.3
-
-library db
-    exposed-modules:    DB
-    hs-source-dirs:     app
-    default-language:   Haskell2010
-    default-extensions:
-        FlexibleContexts FlexibleInstances FunctionalDependencies
-        MultiParamTypeClasses RankNTypes TemplateHaskell
-        TypeSynonymInstances UnicodeSyntax
-
-    build-depends:
-        base ^>=4.14.3.0,
-        lens >=5.1.1 && <5.2,
-        mtl >=2.2.2 && <2.3
-
 executable optics-by-example
     main-is:            Main.hs
-    hs-source-dirs:     app
+    hs-source-dirs:     app src
     other-modules:
+        ClassyLenses
         DB
         DBClassy
+        Folds
+        IndexableStructures
+        IndexedOptics
         Init
+        Isos
+        Lenses
+        Operators
+        Optics
+        OpticsAndMonads
+        PolymorphicOptics
+        Prisms
+        Traversals
 
     default-language:   Haskell2010
     default-extensions:
-        DeriveFoldable FlexibleContexts FlexibleInstances
+        DeriveFoldable FlexibleContexts FlexibleInstances GADTs
         FunctionalDependencies InstanceSigs MultiParamTypeClasses
-        NamedFieldPuns RankNTypes ScopedTypeVariables TemplateHaskell
-        TupleSections TypeApplications TypeFamilies UnicodeSyntax
+        NamedFieldPuns PartialTypeSignatures RankNTypes ScopedTypeVariables
+        StrictData TemplateHaskell TupleSections TypeApplications
+        TypeFamilies UnicodeSyntax
 
     build-depends:
         aeson >=2.1.0 && <2.2,
@@ -74,7 +47,7 @@ executable json-optics
     default-language:   Haskell2010
     default-extensions:
         DeriveAnyClass DeriveGeneric DerivingStrategies OverloadedStrings
-        QuasiQuotes TemplateHaskell TypeApplications UnicodeSyntax
+        GADTs QuasiQuotes TemplateHaskell TypeApplications UnicodeSyntax
 
     build-depends:
         aeson >=2.1.0 && <2.2,
@@ -85,4 +58,4 @@ executable json-optics
         lens-aeson >=1.2.1 && <1.3,
         raw-strings-qq >=1.1 && <1.2,
         text >=1.2.4 && <1.3,
-        vector >= 0.13.0 && < 0.14
+        vector >=0.13.0 && <0.14

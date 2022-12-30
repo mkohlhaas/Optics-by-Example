@@ -1,5 +1,4 @@
 -- {-# OPTIONS_GHC -ddump-splices #-}
-{-# LANGUAGE GADTs #-}
 
 module Main where
 

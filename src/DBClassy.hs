@@ -2,7 +2,6 @@
 
 -- We export the DBConfig alongside the typeclass since anyone implementing the typeclass
 -- will presumably need to have a DBConfig nested in their object somewhere.
-{-# LANGUAGE GADTs #-}
 
 module DBClassy (DbConfig (..), HasDbConfig (..), connectDBClassy) where
 
